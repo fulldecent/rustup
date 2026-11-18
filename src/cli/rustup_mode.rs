@@ -29,14 +29,13 @@ use crate::{
     cli::{
         common::{self, PackageUpdate, report_error, update_console_filter},
         completions, docs,
-        errors::CliError,
         help::{
             check_help, completions_help, doc_help, install_help, official_toolchain_arg_help,
             resolvable_local_toolchain_arg_help, resolvable_toolchain_arg_help, run_help,
             rustup_help, show_active_toolchain_help, show_help, toolchain_help,
             toolchain_install_help, toolchain_link_help, topic_arg_help, update_help,
         },
-        self_update::{self, SelfUpdateMode, check_rustup_update},
+        self_update,
     },
     command, component_for_bin,
     config::{ActiveSource, Cfg, OverrideFile},
@@ -160,7 +159,7 @@ enum RustupSubcmd {
         subcmd: Option<ShowSubcmd>,
     },
 
-    /// Update Rust toolchains and rustup
+    /// Update Rust toolchains
     #[command(
         after_help = update_help(),
         aliases = ["upgrade", "up"],
@@ -169,10 +168,6 @@ enum RustupSubcmd {
         /// Toolchain name, such as 'stable', 'nightly', or '1.8.0'. For more information see `rustup help toolchain`
         #[arg(num_args = 1.., value_parser = update_toolchain_value_parser)]
         toolchain: Vec<PartialChannelToolchainName>,
-
-        /// Don't perform self update when running the `rustup update` command
-        #[arg(long)]
-        no_self_update: bool,
 
         /// Allow downgrading the toolchain
         #[arg(long)]
@@ -191,12 +186,9 @@ enum RustupSubcmd {
         check: bool,
     },
 
-    /// Check for updates to Rust toolchains and rustup
+    /// Check for updates to Rust toolchains
     #[command(after_help = check_help())]
-    Check {
-        #[command(flatten)]
-        opts: CheckOpts,
-    },
+    Check,
 
     /// Modify a toolchain's supported targets
     Target {
@@ -289,11 +281,7 @@ enum RustupSubcmd {
 }
 
 fn update_toolchain_value_parser(s: &str) -> anyhow::Result<PartialChannelToolchainName> {
-    PartialChannelToolchainName::from_str(s).inspect_err(|_| {
-        if s == "self" {
-            info!("if you meant to update rustup itself, use `rustup self update`");
-        }
-    })
+    PartialChannelToolchainName::from_str(s)
 }
 
 impl RustupSubcmd {
@@ -418,13 +406,6 @@ enum ToolchainSubcmd {
 }
 
 #[derive(Debug, Default, Args)]
-struct CheckOpts {
-    /// Don't check for self update when running the `rustup check` command
-    #[arg(long)]
-    no_self_update: bool,
-}
-
-#[derive(Debug, Default, Args)]
 struct UpdateOpts {
     #[arg(
         help = official_toolchain_arg_help(),
@@ -442,10 +423,6 @@ struct UpdateOpts {
     /// Comma-separated list of targets to be added on installation
     #[arg(short, long, value_delimiter = ',')]
     target: Vec<String>,
-
-    /// Don't perform self update when running the `rustup toolchain install` command
-    #[arg(long)]
-    no_self_update: bool,
 
     /// Don't try to update the installed toolchain
     #[arg(long)]
@@ -571,10 +548,6 @@ enum ComponentSubcmd {
     subcommand_required = true
 )]
 enum SelfSubcmd {
-    /// Download and install updates to rustup
-    #[command(alias = "up")]
-    Update,
-
     /// Uninstall rustup
     Uninstall {
         /// Disable confirmation prompt
@@ -602,12 +575,6 @@ enum SetSubcmd {
         profile_name: Profile,
     },
 
-    /// The rustup auto self update mode
-    AutoSelfUpdate {
-        #[arg(value_enum, default_value_t)]
-        auto_self_update_mode: SelfUpdateMode,
-    },
-
     /// The auto toolchain install mode
     AutoInstall {
         #[arg(value_enum, default_value_t)]
@@ -632,8 +599,6 @@ pub async fn main(
         .var("RUSTUP_COMPLETE")
         .bin("rustup")
         .complete();
-
-    self_update::cleanup_self_updater(process, &process.cargo_home()?.join("bin"))?;
 
     use clap::error::ErrorKind::*;
     let matches = match Rustup::try_parse_from(process.args_os()) {
@@ -700,7 +665,6 @@ pub async fn main(
         }),
         RustupSubcmd::Update {
             toolchain,
-            no_self_update,
             allow_downgrade,
             force,
             force_non_host,
@@ -710,7 +674,6 @@ pub async fn main(
                 cfg,
                 UpdateOpts {
                     toolchain,
-                    no_self_update,
                     allow_downgrade,
                     force,
                     force_non_host,
@@ -732,7 +695,7 @@ pub async fn main(
             ToolchainSubcmd::Uninstall { opts } => toolchain_remove(cfg, opts).await,
             ToolchainSubcmd::Pin { qualified } => pin_active_toolchain(qualified, cfg),
         },
-        RustupSubcmd::Check { opts } => check_updates(cfg, opts).await,
+        RustupSubcmd::Check => check_updates(cfg).await,
         RustupSubcmd::Target { subcmd } => match subcmd {
             TargetSubcmd::List {
                 toolchain,
@@ -779,7 +742,6 @@ pub async fn main(
         #[cfg(not(windows))]
         RustupSubcmd::Man { command, toolchain } => docs::man(cfg, &command, toolchain).await,
         RustupSubcmd::Self_ { subcmd } => match subcmd {
-            SelfSubcmd::Update => self_update::update(cfg).await,
             SelfSubcmd::Uninstall {
                 no_prompt,
                 no_modify_path,
@@ -793,9 +755,6 @@ pub async fn main(
             SetSubcmd::Profile { profile_name } => {
                 cfg.set_profile(profile_name).map(|_| ExitCode::SUCCESS)
             }
-            SetSubcmd::AutoSelfUpdate {
-                auto_self_update_mode,
-            } => set_auto_self_update(cfg, auto_self_update_mode),
             SetSubcmd::AutoInstall { auto_install_mode } => cfg
                 .set_auto_install(auto_install_mode)
                 .map(|_| ExitCode::SUCCESS),
@@ -821,7 +780,7 @@ pub async fn main(
     Ok(exit_code)
 }
 
-async fn check_updates(cfg: &Cfg<'_>, opts: CheckOpts) -> anyhow::Result<ExitCode> {
+async fn check_updates(cfg: &Cfg<'_>) -> anyhow::Result<ExitCode> {
     let t = cfg.process.stdout();
     let use_colors = matches!(t.color_choice(), ColorChoice::Auto | ColorChoice::Always);
     let mut update_available = false;
@@ -937,22 +896,6 @@ async fn check_updates(cfg: &Cfg<'_>, opts: CheckOpts) -> anyhow::Result<ExitCod
         }
     }
 
-    let self_update_mode = SelfUpdateMode::from_cfg(cfg)?;
-    // Priority: no-self-update feature > self_update_mode > no-self-update args.
-    // Check for update only if rustup does **not** have the no-self-update feature,
-    // and auto-self-update is configured to **enable** or **check-only**
-    // and has **no** no-self-update parameter.
-    let self_update = !cfg!(feature = "no-self-update")
-        && matches!(
-            self_update_mode,
-            SelfUpdateMode::Enable | SelfUpdateMode::CheckOnly
-        )
-        && !opts.no_self_update;
-
-    if self_update && check_rustup_update(&DownloadCfg::new(cfg)).await? {
-        update_available = true;
-    }
-
     Ok(if update_available {
         ExitCode::UPDATES_AVAILABLE
     } else {
@@ -968,8 +911,6 @@ async fn update(
     let mut exit_code = ExitCode::SUCCESS;
 
     common::warn_if_host_is_emulated(cfg.process);
-    let self_update_mode = SelfUpdateMode::from_cfg(cfg)?;
-    let should_self_update = !opts.no_self_update;
     let force_non_host = opts.force_non_host;
     cfg.profile_override = opts.profile;
 
@@ -978,7 +919,6 @@ async fn update(
         warn!("{}", common::WARN_COMPLETE_PROFILE);
     }
 
-    let dl_cfg = DownloadCfg::new(cfg);
     let names = opts.toolchain;
     if !names.is_empty() {
         for name in names {
@@ -1029,19 +969,16 @@ async fn update(
                 Ok(status),
             )?;
         }
-        exit_code &= self_update_mode.update(should_self_update, &dl_cfg).await?;
     } else if ensure_active_toolchain {
         let (toolchain, source) = cfg.ensure_active_toolchain(force_non_host, true).await?;
         info!("the active toolchain `{}` has been installed", *toolchain);
         info!("it's active because: {}", source.to_reason());
-        exit_code &= self_update_mode.update(should_self_update, &dl_cfg).await?;
     } else {
         exit_code &= common::update_all_channels(cfg, opts.force, opts.check).await?;
-        exit_code &= self_update_mode.update(should_self_update, &dl_cfg).await?;
 
         info!("cleaning up downloads & tmp directories");
         utils::delete_dir_contents_following_links(&cfg.download_dir);
-        dl_cfg.tmp_cx.clean();
+        DownloadCfg::new(cfg).tmp_cx.clean();
     }
 
     Ok(exit_code)
@@ -1538,26 +1475,6 @@ fn pin_active_toolchain(qualified: bool, cfg: &Cfg<'_>) -> anyhow::Result<ExitCo
             "# Check the docs at https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file\n\n{toml_buf}",
         ),
     )?;
-    Ok(ExitCode::SUCCESS)
-}
-
-fn set_auto_self_update(
-    cfg: &Cfg<'_>,
-    auto_self_update_mode: SelfUpdateMode,
-) -> anyhow::Result<ExitCode> {
-    if cfg!(feature = "no-self-update") {
-        let mut args = cfg.process.args_os();
-        let arg0 = args.next().map(PathBuf::from);
-        let arg0 = arg0
-            .as_ref()
-            .and_then(|a| a.to_str())
-            .ok_or(CliError::NoExeName)?;
-        warn!(
-            "{} is built with the no-self-update feature: setting auto-self-update will not have any effect.",
-            arg0
-        );
-    }
-    cfg.set_auto_self_update(auto_self_update_mode)?;
     Ok(ExitCode::SUCCESS)
 }
 

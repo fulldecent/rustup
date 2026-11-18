@@ -22,7 +22,7 @@ reqwest-rustls-tls = [
   "dep:rustls-platform-verifier",
 ]
 
-# Include in the default set to disable self-update and uninstall.
+# Disables `rustup self uninstall`.
 no-self-update = []
 
 # Include an Opentelemetry sink for tracing events

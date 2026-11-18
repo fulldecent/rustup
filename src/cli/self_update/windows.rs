@@ -41,10 +41,7 @@ use windows_sys::Win32::{
     },
 };
 
-use super::{
-    InstallOpts, report_error,
-    stage::{self, PreparedUpdater, SelfUpdateLock},
-};
+use super::{InstallOpts, report_error};
 use crate::{
     cli::{common, errors::CliError, markdown::md},
     dist::TargetTuple,
@@ -577,28 +574,6 @@ pub(crate) fn remove_uninstall_registry_entry(process: &Process) -> anyhow::Resu
         Err(e) if e.code() == WIN32_ERROR(ERROR_FILE_NOT_FOUND).to_hresult() => Ok(()),
         Err(e) => Err(anyhow!(e)),
     }
-}
-
-pub(super) fn run_update(
-    prepared_updater: PreparedUpdater,
-    _process: &Process,
-) -> anyhow::Result<utils::ExitCode> {
-    prepared_updater.spawn_replacer()?;
-
-    Ok(utils::ExitCode(0))
-}
-
-pub(crate) fn self_replace(process: &Process) -> anyhow::Result<utils::ExitCode> {
-    wait_for_parent(process)?;
-    let self_update_lock = SelfUpdateLock::lock(process)?;
-    let result = process.cargo_home().and_then(|cargo_home| {
-        self_update_lock.install_bins(&cargo_home.join("bin"), super::force_hard_links(process))?;
-        update_uninstall_registry_display_version(env!("CARGO_PKG_VERSION"), process)
-    });
-    stage::mark_result(result.is_ok(), process);
-    result?;
-
-    Ok(utils::ExitCode(0))
 }
 
 // Spawn a temporary rustup-gc-$random.exe to finish Windows uninstall

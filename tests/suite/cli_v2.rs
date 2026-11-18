@@ -2490,10 +2490,6 @@ rls-[HOST_TUPLE] (installed)
 async fn test_warn_if_complete_profile_is_used() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "set", "auto-self-update", "enable"])
-        .await
-        .is_ok();
-    cx.config
         .expect([
             "rustup",
             "toolchain",
@@ -2509,7 +2505,7 @@ warn: downloading with the `complete` profile is deprecated
 help: consider switching to the `default` profile with `rustup set profile default`
 ...
 "#]])
-        .is_err();
+        .is_ok();
 }
 
 #[tokio::test]

@@ -145,14 +145,12 @@ pub(crate) fn show_channel_update(
 }
 
 pub(crate) enum PackageUpdate {
-    Rustup,
     Toolchain(ChannelToolchainName),
 }
 
 impl Display for PackageUpdate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Rustup => write!(f, "rustup"),
             Self::Toolchain(t) => write!(f, "{t}"),
         }
     }
@@ -171,19 +169,6 @@ fn show_channel_updates(
         };
 
         let (previous_version, version) = match &pkg {
-            PackageUpdate::Rustup => {
-                let previous_version: Option<String> = match result {
-                    Ok(UpdateStatus::Installed) | Ok(UpdateStatus::Unchanged) | Err(_) => None,
-                    _ => Some(env!("CARGO_PKG_VERSION").into()),
-                };
-                let version = match result {
-                    Err(_) | Ok(UpdateStatus::Installed) | Ok(UpdateStatus::Unchanged) => {
-                        env!("CARGO_PKG_VERSION").into()
-                    }
-                    Ok(UpdateStatus::Updated(v)) => v,
-                };
-                (previous_version, version)
-            }
             PackageUpdate::Toolchain(name) => {
                 // this is a bit strange: we don't supply the version we
                 // presumably had (for Installed and Unchanged), so we query it

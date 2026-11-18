@@ -206,14 +206,6 @@ fn rustup_self_cmd_uninstall_cmd_help_flag() {
 }
 
 #[test]
-fn rustup_self_cmd_update_cmd_help_flag() {
-    test_help(
-        "rustup_self_cmd_update_cmd_help_flag",
-        &["self", "update", "--help"],
-    );
-}
-
-#[test]
 fn rustup_self_cmd_upgrade_data_cmd_help_flag() {
     test_help(
         "rustup_self_cmd_upgrade_data_cmd_help_flag",
@@ -231,14 +223,6 @@ fn rustup_set_cmd_auto_install_cmd_help_flag() {
     test_help(
         "rustup_set_cmd_auto_install_cmd_help_flag",
         &["set", "auto-install", "--help"],
-    );
-}
-
-#[test]
-fn rustup_set_cmd_auto_self_update_cmd_help_flag() {
-    test_help(
-        "rustup_set_cmd_auto_self_update_cmd_help_flag",
-        &["set", "auto-self-update", "--help"],
     );
 }
 

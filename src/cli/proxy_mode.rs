@@ -1,7 +1,7 @@
 use std::{path::PathBuf, process::ExitStatus, str::FromStr};
 
 use crate::{
-    cli::{job, self_update},
+    cli::job,
     command::run_command_for_dir,
     config::{ActiveSource, Cfg},
     process::Process,
@@ -14,8 +14,6 @@ pub async fn main(
     current_dir: PathBuf,
     process: &Process,
 ) -> anyhow::Result<ExitStatus> {
-    self_update::cleanup_self_updater(process, &process.cargo_home()?.join("bin"))?;
-
     let _setup = job::setup();
     let mut args = process.args_os().skip(1);
 

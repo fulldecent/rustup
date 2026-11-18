@@ -1,23 +1,15 @@
-//! Self-installation and updating
+//! Installation and removal of the rustup binary.
 //!
-//! This is the installer at the heart of Rust. If it breaks
-//! everything breaks. It is conceptually very simple, as rustup is
-//! distributed as a single binary, and installation mostly requires
-//! copying it into place. There are some tricky bits though, mostly
-//! because of workarounds to self-delete an exe on Windows.
+//! rustup is distributed as a single binary. Installation copies that
+//! binary into place. Removing it is racy on Windows because a running
+//! executable cannot be deleted.
 //!
 //! During install (as `rustup-init`):
 //!
 //! * copy the self exe to $CARGO_HOME/bin
 //!
 //! The installer does not create proxy names, edit PATH, or download a toolchain.
-//!
-//! During upgrade (`rustup self update`):
-//!
-//! * download rustup-init to a managed path under `$RUSTUP_HOME`
-//! * run the downloaded binary in replacement mode
-//! * atomically replace the rustup binary. On Windows this happens
-//!   after the update command exits.
+//! There is no command that replaces the installed rustup binary.
 //!
 //! During uninstall (`rustup self uninstall`):
 //!
@@ -38,14 +30,11 @@ use std::{
     fmt, fs,
     io::{self, Write},
     path::{MAIN_SEPARATOR, Path, PathBuf},
-    process::Command,
     str::FromStr,
 };
 
-use anstyle::Style;
 use anyhow::{Context, anyhow};
-use clap::{ValueEnum, builder::PossibleValue};
-use clap_cargo::style::{GOOD, WARN};
+use clap::ValueEnum;
 use itertools::Itertools;
 use same_file::is_same_file;
 use serde::{Deserialize, Serialize};
@@ -54,23 +43,15 @@ use tracing::{error, info, trace, warn};
 use crate::{
     DUP_TOOLS, TOOLS,
     cli::{
-        common::{self, Confirm, PackageUpdate, report_error},
+        common::{self, Confirm, report_error},
         errors::CliError,
         markdown::md,
     },
     config::Cfg,
-    dist::{
-        Profile, TargetTuple,
-        download::DownloadCfg,
-    },
-    download::{DownloadError, DownloadOptions},
-    errors::RustupError,
-    install::UpdateStatus,
+    dist::{Profile, TargetTuple},
     process::Process,
     settings::SettingsFile,
-    toolchain::{
-        MaybeChannelToolchainName, PartialToolchainName, Toolchain,
-    },
+    toolchain::{MaybeChannelToolchainName, PartialToolchainName, Toolchain},
     utils::{self, ExitCode},
 };
 
@@ -78,27 +59,19 @@ use crate::{
 mod msg;
 
 mod stage;
-#[cfg(feature = "test")]
-pub use stage::{Marker, SELF_UPDATE_DIRECTORY, updater_path};
-use stage::{PreparedUpdater, SelfUpdateLock};
+use stage::InstallLock;
 
 #[cfg(unix)]
 mod unix;
-#[cfg(unix)]
-pub(crate) use unix::self_replace;
-#[cfg(unix)]
-use unix::run_update;
 
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
 pub use windows::complete_windows_uninstall;
-#[cfg(windows)]
-pub(crate) use windows::self_replace;
 #[cfg(all(windows, feature = "test"))]
 pub use windows::{RUSTUP_REGISTRY_TEST_ID, RegistryValueId, USER_PATH, get_path};
 #[cfg(windows)]
-use windows::{add_uninstall_registry_entry, remove_uninstall_registry_entry, run_update};
+use windows::{add_uninstall_registry_entry, remove_uninstall_registry_entry};
 
 pub(crate) struct InstallOpts<'a> {
     pub default_host_tuple: Option<String>,
@@ -331,119 +304,6 @@ pub enum SelfUpdateMode {
     CheckOnly,
 }
 
-impl SelfUpdateMode {
-    pub(crate) fn from_cfg(cfg: &Cfg<'_>) -> anyhow::Result<Self> {
-        if cfg.process.is_ci() {
-            return Ok(Self::Disable);
-        }
-
-        cfg.settings_file.with(|s| {
-            Ok(match s.auto_self_update {
-                Some(mode) => mode,
-                None => Self::Enable,
-            })
-        })
-    }
-
-    pub(crate) fn as_str(&self) -> &'static str {
-        match self {
-            Self::Enable => "enable",
-            Self::Disable => "disable",
-            Self::CheckOnly => "check-only",
-        }
-    }
-
-    /// Optionally performs a self-update: check policy, download, apply and exit.
-    ///
-    /// Whether the self-update is executed is based on both compile-time and runtime
-    /// configurations, where the priority is as follows:
-    /// no-self-update feature > self update mode > CLI flag
-    ///
-    /// i.e. update only if rustup does **not** have the no-self-update feature,
-    /// and self update mode is configured to **enable**
-    /// and has **no** `--no-self-update` CLI flag.
-    pub(crate) async fn update(
-        &self,
-        should_self_update: bool,
-        dl_cfg: &DownloadCfg<'_>,
-    ) -> anyhow::Result<ExitCode> {
-        if cfg!(feature = "no-self-update") {
-            info!("self-update is disabled for this build of rustup");
-            info!("any updates to rustup will need to be fetched with your system package manager");
-            return Ok(ExitCode::SUCCESS);
-        }
-        match self {
-            Self::Enable if should_self_update => (),
-            Self::CheckOnly => {
-                check_rustup_update(dl_cfg).await?;
-                return Ok(ExitCode::SUCCESS);
-            }
-            _ => return Ok(ExitCode::SUCCESS),
-        }
-
-        match self_update_permitted(false)? {
-            SelfUpdatePermission::HardFail => {
-                error!("Unable to self-update.  STOP");
-                return Ok(ExitCode::FAILURE);
-            }
-            #[cfg(not(windows))]
-            SelfUpdatePermission::Skip => return Ok(ExitCode::SUCCESS),
-            SelfUpdatePermission::Permit => {}
-        }
-
-        let prepared_updater = prepare_update(dl_cfg).await?;
-
-        if let Some(prepared_updater) = prepared_updater {
-            return run_update(prepared_updater, dl_cfg.process);
-        }
-
-        Ok(ExitCode::SUCCESS)
-    }
-}
-
-impl ValueEnum for SelfUpdateMode {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Enable, Self::Disable, Self::CheckOnly]
-    }
-
-    fn to_possible_value(&self) -> Option<PossibleValue> {
-        Some(PossibleValue::new(self.as_str()))
-    }
-
-    fn from_str(input: &str, _: bool) -> Result<Self, String> {
-        <Self as FromStr>::from_str(input).map_err(|e| e.to_string())
-    }
-}
-
-impl FromStr for SelfUpdateMode {
-    type Err = anyhow::Error;
-
-    fn from_str(mode: &str) -> anyhow::Result<Self> {
-        match mode {
-            "enable" => Ok(Self::Enable),
-            "disable" => Ok(Self::Disable),
-            "check-only" => Ok(Self::CheckOnly),
-            _ => Err(anyhow!(format!(
-                "unknown self update mode: '{}'; valid modes are {}",
-                mode,
-                Self::value_variants().iter().join(", ")
-            ))),
-        }
-    }
-}
-
-impl fmt::Display for SelfUpdateMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-fn update_root(process: &Process) -> String {
-    process
-        .var("RUSTUP_UPDATE_ROOT")
-        .inspect(|url| trace!("`RUSTUP_UPDATE_ROOT` has been set to `{url}`"))
-        .unwrap_or_else(|_| String::from(DEFAULT_UPDATE_ROOT))
-}
 
 /// Displays an installation path with a platform-specific home abbreviation.
 struct HomeDisplay<'a> {
@@ -559,7 +419,7 @@ fn warn_if_default_linker_missing(process: &Process) {
 }
 
 fn install_bins(process: &Process, bin_path: &Path, force_hard_links: bool) -> anyhow::Result<()> {
-    SelfUpdateLock::lock(process)?.install_bins(bin_path, force_hard_links)
+    InstallLock::lock(process)?.install_bins(bin_path, force_hard_links)
 }
 
 fn force_hard_links(process: &Process) -> bool {
@@ -720,315 +580,6 @@ fn clean_cargo_home(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum SelfUpdatePermission {
-    HardFail,
-    #[cfg(not(windows))]
-    Skip,
-    Permit,
-}
-
-#[cfg(windows)]
-pub(crate) fn self_update_permitted(_explicit: bool) -> anyhow::Result<SelfUpdatePermission> {
-    Ok(SelfUpdatePermission::Permit)
-}
-
-#[cfg(not(windows))]
-pub(crate) fn self_update_permitted(explicit: bool) -> anyhow::Result<SelfUpdatePermission> {
-    // Detect if rustup is not meant to self-update
-    let current_exe = env::current_exe()?;
-    let current_exe_dir = current_exe.parent().expect("Rustup isn't in a directory‽");
-    if let Err(e) = tempfile::Builder::new()
-        .prefix("updtest")
-        .tempdir_in(current_exe_dir)
-    {
-        match e.kind() {
-            io::ErrorKind::PermissionDenied => {
-                trace!("Skipping self-update because we cannot write to the rustup dir");
-                if explicit {
-                    return Ok(SelfUpdatePermission::HardFail);
-                } else {
-                    return Ok(SelfUpdatePermission::Skip);
-                }
-            }
-            _ => return Err(e.into()),
-        }
-    }
-    Ok(SelfUpdatePermission::Permit)
-}
-
-/// Downloads the managed updater and runs it in replacement mode.
-///
-/// The updater is removed by a later rustup invocation because Windows
-/// cannot delete the updater while its process is still running.
-pub(crate) async fn update(cfg: &Cfg<'_>) -> anyhow::Result<ExitCode> {
-    common::warn_if_host_is_emulated(cfg.process);
-
-    use SelfUpdatePermission::*;
-    let update_permitted = if cfg!(feature = "no-self-update") {
-        HardFail
-    } else {
-        self_update_permitted(true)?
-    };
-    match update_permitted {
-        HardFail => {
-            // TODO: Detect which package manager and be more useful.
-            error!("self-update is disabled for this build of rustup");
-            error!("you should probably use your system package manager to update rustup");
-            return Ok(ExitCode::FAILURE);
-        }
-        #[cfg(not(windows))]
-        Skip => {
-            info!("Skipping self-update at this time");
-            return Ok(ExitCode::SUCCESS);
-        }
-        Permit => {}
-    }
-
-    match prepare_update(&DownloadCfg::new(cfg)).await? {
-        Some(prepared_updater) => {
-            let Some(version) = get_and_parse_new_rustup_version(&prepared_updater) else {
-                error!("failed to get rustup version");
-                return Ok(ExitCode::FAILURE);
-            };
-
-            let _ = common::show_channel_update(
-                cfg,
-                PackageUpdate::Rustup,
-                Ok(UpdateStatus::Updated(version)),
-            );
-            return run_update(prepared_updater, cfg.process);
-        }
-        None => {
-            let _ = common::show_channel_update(
-                cfg,
-                PackageUpdate::Rustup,
-                Ok(UpdateStatus::Unchanged),
-            );
-        }
-    }
-
-    Ok(ExitCode::SUCCESS)
-}
-
-fn get_and_parse_new_rustup_version(path: &Path) -> Option<String> {
-    get_new_rustup_version(path).map(parse_new_rustup_version)
-}
-
-fn get_new_rustup_version(path: &Path) -> Option<String> {
-    let output = Command::new(path).arg("--version").output().ok()?;
-    String::from_utf8(output.stdout).ok()
-}
-
-fn parse_new_rustup_version(version: String) -> String {
-    use std::sync::LazyLock;
-
-    use regex::Regex;
-
-    static RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"[0-9]+.[0-9]+.[0-9]+[0-9a-zA-Z-]*").unwrap());
-
-    let capture = RE.captures(&version);
-    let matched_version = match capture {
-        Some(cap) => cap.get(0).unwrap().as_str(),
-        None => "(unknown)",
-    };
-    String::from(matched_version)
-}
-
-async fn prepare_update(dl_cfg: &DownloadCfg<'_>) -> anyhow::Result<Option<PreparedUpdater>> {
-    let cargo_home = dl_cfg.process.cargo_home()?;
-    let rustup_path = cargo_home.join(format!("bin{MAIN_SEPARATOR}rustup{EXE_SUFFIX}"));
-
-    if !rustup_path.exists() {
-        return Err(CliError::NotSelfInstalled { p: cargo_home }.into());
-    }
-    let self_update_lock = SelfUpdateLock::lock(dl_cfg.process)?;
-
-    // Get build tuple
-    let tuple = TargetTuple::from_build();
-
-    // For windows x86 builds seem slow when used with windows defender.
-    // The website defaulted to i686-windows-gnu builds for a long time.
-    // This ensures that we update to a version that's appropriate for users
-    // and also works around if the website messed up the detection.
-    // If someone really wants to use another version, they still can enforce
-    // that using the environment variable RUSTUP_OVERRIDE_HOST_TUPLE.
-    #[cfg(windows)]
-    let tuple = TargetTuple::from_host(dl_cfg.process).unwrap_or(tuple);
-
-    // Get update root.
-    let update_root = update_root(dl_cfg.process);
-
-    // Get current version
-    let current_version = env!("CARGO_PKG_VERSION");
-
-    // Get available version
-    info!("checking for self-update (current version: {current_version})");
-    let available_version = match dl_cfg.process.var_opt("RUSTUP_VERSION")? {
-        Some(ver) => {
-            info!("`RUSTUP_VERSION` has been set to `{ver}`");
-            ver
-        }
-        None => get_available_rustup_version(dl_cfg).await?,
-    };
-
-    // If up-to-date
-    if available_version == current_version {
-        return Ok(None);
-    }
-
-    // Get download URL
-    let url = format!("{update_root}/archive/{available_version}/{tuple}/rustup-init{EXE_SUFFIX}");
-
-    // Get download path
-    let download_url = utils::parse_url(&url)?;
-    let prepared_updater = PreparedUpdater::try_from(self_update_lock)?;
-
-    // Download the new rustup executable
-    info!("downloading self-update (new version: {available_version})");
-    match dl_cfg.download_hash(download_url.as_str()).await {
-        Ok(hash) => {
-            let name = "rustup";
-            let status = dl_cfg.status_for(name, name.len());
-
-            let installer = dl_cfg
-                .download_with_retry(&download_url, &hash, &status, dl_cfg.max_retries())
-                .await?;
-
-            utils::rename(
-                name,
-                &installer,
-                &prepared_updater,
-                dl_cfg.permit_copy_rename,
-            )?;
-        }
-        // If the corresponding `.sha256` file is not found, skip hash check and use simple download
-        // as a fallback.
-        Err(e)
-            if matches!(
-                e.downcast_ref::<DownloadError>(),
-                Some(DownloadError::HttpStatus(404) | DownloadError::FileNotFound)
-            ) =>
-        {
-            warn!(url = %download_url, "`.sha256` checksum not found, skipping hash check");
-            DownloadOptions::try_from(dl_cfg.process)?
-                .start(&download_url, &prepared_updater)
-                .download()
-                .await?;
-        }
-        Err(e) => return Err(e),
-    };
-
-    // Mark as executable
-    utils::make_executable(&prepared_updater)?;
-
-    #[cfg(feature = "test")]
-    dl_cfg.process.checkpoint(CHECKPOINT_SELF_UPDATE_PREPARED);
-
-    Ok(Some(prepared_updater))
-}
-
-async fn get_available_rustup_version(dl_cfg: &DownloadCfg<'_>) -> anyhow::Result<String> {
-    let update_root = update_root(dl_cfg.process);
-    let tempdir = tempfile::Builder::new()
-        .prefix("rustup-update")
-        .tempdir()
-        .context("error creating temp directory")?;
-
-    // Parse the release file.
-    let release_file_url = format!("{update_root}/release-stable.toml");
-    let release_file_url = utils::parse_url(&release_file_url)?;
-    let release_file = tempdir.path().join("release-stable.toml");
-    DownloadOptions::try_from(dl_cfg.process)?
-        .start(&release_file_url, &release_file)
-        .download()
-        .await?;
-
-    let release_toml_str = utils::read_file("rustup release", &release_file)?;
-    let release_toml = toml::from_str::<RustupManifest>(&release_toml_str)
-        .context("unable to parse rustup release file")?;
-
-    Ok(release_toml.version)
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-struct RustupManifest {
-    schema_version: SchemaVersion,
-    version: String,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) enum SchemaVersion {
-    #[serde(rename = "1")]
-    #[default]
-    V1,
-}
-
-impl SchemaVersion {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::V1 => "1",
-        }
-    }
-}
-
-impl FromStr for SchemaVersion {
-    type Err = RustupError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "1" => Ok(Self::V1),
-            _ => Err(RustupError::UnsupportedVersion(s.to_owned())),
-        }
-    }
-}
-
-impl fmt::Display for SchemaVersion {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-/// Returns whether an update was available
-pub(crate) async fn check_rustup_update(dl_cfg: &DownloadCfg<'_>) -> anyhow::Result<bool> {
-    let t = dl_cfg.process.stdout();
-    let mut t = t.lock();
-    // Get current rustup version
-    let current_version = env!("CARGO_PKG_VERSION");
-
-    // Get available rustup version
-    let available_version = get_available_rustup_version(dl_cfg).await?;
-
-    let bold = Style::new().bold();
-    let yellow = WARN;
-    let green = GOOD;
-
-    write!(t, "{bold}rustup - {bold:#}")?;
-
-    Ok(if current_version != available_version {
-        writeln!(
-            t,
-            "{yellow}update available{yellow:#} : {current_version} -> {available_version}"
-        )?;
-        true
-    } else {
-        writeln!(t, "{green}up to date{green:#} : {current_version}")?;
-        false
-    })
-}
-
-#[tracing::instrument(level = "trace")]
-pub(crate) fn cleanup_self_updater(process: &Process, bin_path: &Path) -> anyhow::Result<()> {
-    stage::cleanup(process, bin_path)
-}
-
-static DEFAULT_UPDATE_ROOT: &str = "https://static.rust-lang.org/rustup";
-#[cfg(feature = "test")]
-pub const CHECKPOINT_SELF_UPDATE_PREPARED: &str = "self-update-prepared";
-#[cfg(feature = "test")]
-pub const CHECKPOINT_SELF_REPLACE_READY: &str = "self-replace-ready";
 
 #[cfg(test)]
 mod tests {

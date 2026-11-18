@@ -1,9 +1,7 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, bail};
 use tracing::{error, warn};
 
-use super::stage::{self, PreparedUpdater, SelfUpdateLock};
 use crate::{process::Process, utils};
 
 // If the user is trying to install with sudo, on some systems this will
@@ -43,38 +41,6 @@ pub(crate) fn anti_sudo_check(
             }
         }
     }
-
-    Ok(utils::ExitCode(0))
-}
-
-/// Tell the updater to replace the rustup binary, then wait for it to finish.
-pub(super) fn run_update(
-    prepared_updater: PreparedUpdater,
-    _process: &Process,
-) -> anyhow::Result<utils::ExitCode> {
-    let setup_path = prepared_updater.to_path_buf();
-    let status = prepared_updater
-        .spawn_replacer()?
-        .wait()
-        .with_context(|| format!("unable to wait for updater ({})", setup_path.display()))?;
-
-    if !status.success() {
-        bail!("self-updated failed to replace rustup executable");
-    }
-
-    Ok(utils::ExitCode(0))
-}
-
-/// Replaces `$CARGO_HOME/bin/rustup` with the running executable.
-pub(crate) fn self_replace(process: &Process) -> anyhow::Result<utils::ExitCode> {
-    let self_update_lock = SelfUpdateLock::lock(process)?;
-    #[cfg(feature = "test")]
-    process.checkpoint(super::CHECKPOINT_SELF_REPLACE_READY);
-    let result = process.cargo_home().and_then(|cargo_home| {
-        self_update_lock.install_bins(&cargo_home.join("bin"), super::force_hard_links(process))
-    });
-    stage::mark_result(result.is_ok(), process);
-    result?;
 
     Ok(utils::ExitCode(0))
 }

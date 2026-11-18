@@ -14,7 +14,7 @@ use thiserror::Error as ThisError;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    cli::{common, self_update::SelfUpdateMode},
+    cli::common,
     dist::{
         self, ChannelToolchainName, DistOptions, PartialChannelToolchainName, PartialTargetTuple,
         Profile, Switch, TargetTuple,
@@ -416,15 +416,6 @@ impl<'a> Cfg<'a> {
             Ok(())
         })?;
         info!("profile set to {}", profile.as_str());
-        Ok(())
-    }
-
-    pub(crate) fn set_auto_self_update(&self, mode: SelfUpdateMode) -> anyhow::Result<()> {
-        self.settings_file.with_mut(|s| {
-            s.auto_self_update = Some(mode);
-            Ok(())
-        })?;
-        info!("auto-self-update mode set to {}", mode.as_str());
         Ok(())
     }
 

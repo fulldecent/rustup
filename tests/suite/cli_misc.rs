@@ -1559,20 +1559,6 @@ custom-1 [..]/custom-1
 }
 
 #[tokio::test]
-async fn update_self_smart_guess() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    cx.config
-        .expect(["rustup", "update", "self"])
-        .await
-        .is_err()
-        .with_stderr(snapbox::str![[r#"
-...
-info: if you meant to update rustup itself, use `rustup self update`
-...
-"#]]);
-}
-
-#[tokio::test]
 async fn uninstall_self_smart_guess() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config

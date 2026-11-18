@@ -15,7 +15,7 @@ pub(crate) fn rustup_help() -> String {
 
 {HEADER}Common commands:{HEADER:#}
 
-  Update Rust toolchains and rustup
+  Update installed Rust toolchains
 
     {LITERAL}$ rustup update{LITERAL:#}
     
@@ -56,8 +56,7 @@ pub(crate) fn update_help() -> String {
     format!(
         r"{HEADER}Discussion:{HEADER:#}
   With no toolchain specified, the `update` command updates each of
-  the installed toolchains from the official release channels, then
-  updates rustup itself.
+  the installed toolchains from the official release channels.
 
   If given a toolchain argument then `update` updates that
   toolchain, the same as `rustup toolchain install`.

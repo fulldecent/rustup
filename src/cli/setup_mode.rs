@@ -8,7 +8,7 @@ use tracing_subscriber::{EnvFilter, Registry, reload::Handle};
 use crate::{
     cli::{
         common::{self, update_console_filter},
-        self_update::{self, InstallOpts},
+        self_update::InstallOpts,
     },
     dist::Profile,
     process::Process,
@@ -65,10 +65,6 @@ struct RustupInit {
     #[arg(long)]
     no_modify_path: bool,
 
-    /// Secret command used during self-update. Not for users
-    #[arg(long, hide = true)]
-    self_replace: bool,
-
     /// Internal testament dump used during CI. Not for users
     #[arg(long, hide = true)]
     dump_testament: bool,
@@ -93,7 +89,6 @@ pub async fn main(
         target,
         no_update_default_toolchain,
         no_modify_path,
-        self_replace,
         dump_testament,
     } = match RustupInit::try_parse() {
         Ok(args) => args,
@@ -104,10 +99,6 @@ pub async fn main(
         }
         Err(e) => return Err(format_err!("{}", e.render().ansi())),
     };
-
-    if self_replace {
-        return self_update::self_replace(process);
-    }
 
     if dump_testament {
         return common::dump_testament(process);

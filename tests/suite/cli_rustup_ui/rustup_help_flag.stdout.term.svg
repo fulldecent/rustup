@@ -42,9 +42,9 @@
 </tspan>
     <tspan x="10px" y="208px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">show</tspan><tspan>         Show the active and installed toolchains or profiles</tspan>
 </tspan>
-    <tspan x="10px" y="226px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">update</tspan><tspan>       Update Rust toolchains and rustup</tspan>
+    <tspan x="10px" y="226px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">update</tspan><tspan>       Update Rust toolchains</tspan>
 </tspan>
-    <tspan x="10px" y="244px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">check</tspan><tspan>        Check for updates to Rust toolchains and rustup</tspan>
+    <tspan x="10px" y="244px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">check</tspan><tspan>        Check for updates to Rust toolchains</tspan>
 </tspan>
     <tspan x="10px" y="262px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">target</tspan><tspan>       Modify a toolchain's supported targets</tspan>
 </tspan>
@@ -110,7 +110,7 @@
 </tspan>
     <tspan x="10px" y="820px">
 </tspan>
-    <tspan x="10px" y="838px"><tspan>  Update Rust toolchains and rustup</tspan>
+    <tspan x="10px" y="838px"><tspan>  Update installed Rust toolchains</tspan>
 </tspan>
     <tspan x="10px" y="856px">
 </tspan>
