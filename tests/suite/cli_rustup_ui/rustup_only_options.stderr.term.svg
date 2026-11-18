@@ -40,7 +40,7 @@
 </tspan>
     <tspan x="10px" y="190px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">toolchain</tspan><tspan>    Install, uninstall, or list toolchains</tspan>
 </tspan>
-    <tspan x="10px" y="208px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">show</tspan><tspan>         Show the active and installed toolchains or profiles</tspan>
+    <tspan x="10px" y="208px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">show</tspan><tspan>         Print the toolchain selected for the current directory</tspan>
 </tspan>
     <tspan x="10px" y="226px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">update</tspan><tspan>       Update Rust toolchains</tspan>
 </tspan>
@@ -50,7 +50,7 @@
 </tspan>
     <tspan x="10px" y="280px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">component</tspan><tspan>    Modify a toolchain's installed components</tspan>
 </tspan>
-    <tspan x="10px" y="298px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">run</tspan><tspan>          Run a command with an environment configured for a given toolchain</tspan>
+    <tspan x="10px" y="298px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">run</tspan><tspan>          Run a command under a toolchain</tspan>
 </tspan>
     <tspan x="10px" y="316px"><tspan>  </tspan><tspan class="fg-bright-cyan bold">which</tspan><tspan>        Display which binary will be run for a given command</tspan>
 </tspan>

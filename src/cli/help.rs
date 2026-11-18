@@ -29,13 +29,14 @@ pub(crate) fn rustup_help() -> String {
 pub(crate) fn show_help() -> String {
     format!(
         r"{HEADER}Discussion:{HEADER:#}
-  Shows the name of the active toolchain and the version of `rustc`.
+  Prints the toolchain selected for the current directory.
 
-  If the active toolchain has installed support for additional
-  compilation targets, then they are listed as well.
+  The toolchain is the +toolchain argument on this command, if one
+  was given. Otherwise it is the nearest rust-toolchain.toml, found
+  by walking from the current directory toward the filesystem root.
+  If neither is present, the command exits with an error.
 
-  If there are multiple toolchains installed then all installed
-  toolchains are listed as well."
+  `rustup resolve` is another name for this command."
     )
 }
 
@@ -154,19 +155,21 @@ pub(crate) fn toolchain_link_help() -> String {
 pub(crate) fn run_help() -> String {
     format!(
         r"{HEADER}Discussion:{HEADER:#}
-  Configures an environment to use the given toolchain and then runs
-  the specified program. The command may be any program, not just
-  rustc or cargo. This can be used for testing arbitrary toolchains
-  without setting an override.
+  Runs the given program with the toolchain's bin directory and
+  library path set. The command may be any program, not just rustc
+  or cargo.
 
-  Commands explicitly proxied by `rustup` (such as `rustc` and
-  `cargo`) also have a shorthand for this available. The toolchain
-  can be set by using `+toolchain` as the first argument. These are
-  equivalent:
+  The first argument is a toolchain when it is a channel name, an
+  absolute path, or the name of an installed custom toolchain. That
+  toolchain is installed when it is missing. Otherwise every argument
+  is the command, and the toolchain is resolved the same way as
+  `rustup show`: a +toolchain argument, then rust-toolchain.toml, and
+  an error when neither is present. A toolchain resolved from the
+  file is installed when it is missing.
 
-    {LITERAL}$ cargo +nightly build{LITERAL:#}
+    {LITERAL}$ rustup run nightly cargo build{LITERAL:#}
 
-    {LITERAL}$ rustup run --install nightly cargo build{LITERAL:#}"
+    {LITERAL}$ rustup run cargo build{LITERAL:#}"
     )
 }
 
@@ -326,11 +329,6 @@ pub(crate) fn official_toolchain_arg_help() -> &'static str {
     "Toolchain name, such as 'stable', 'nightly', \
                                        or '1.8.0'. For more information see `rustup \
                                        help toolchain`"
-}
-pub(crate) fn resolvable_local_toolchain_arg_help() -> &'static str {
-    "Toolchain name, such as 'stable', 'nightly', \
-                                       '1.8.0', or a custom toolchain name, or an absolute path. For more \
-                                       information see `rustup help toolchain`"
 }
 pub(crate) fn resolvable_toolchain_arg_help() -> &'static str {
     "Toolchain name, such as 'stable', 'nightly', \

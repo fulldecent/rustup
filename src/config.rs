@@ -150,7 +150,7 @@ impl<T> EnsureInstalled<T> {
 }
 
 impl<T: Display> EnsureInstalled<T> {
-    fn warn_auto_install(&self, process: &Process) {
+    pub(crate) fn warn_auto_install(&self, process: &Process) {
         // If we're already in a recursion, or we haven't just installed the active toolchain, then
         // don't print the warning.
         let recursions = process.var("RUST_RECURSION_COUNT");

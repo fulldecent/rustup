@@ -13,7 +13,7 @@ specified. `rust-toolchain.toml` is discovered by walking from the current
 directory toward the filesystem root, and the nearest file wins. If neither
 is present, the command fails.
 
-To verify which toolchain is active, you can use `rustup show`.
+`rustup show` prints the selected toolchain name. `rustup resolve` is the same command. If neither mechanism is present, the command exits with an error.
 
 [toolchain]: concepts/toolchains.md
 [toolchain override shorthand]: #toolchain-override-shorthand

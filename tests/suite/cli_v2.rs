@@ -2559,14 +2559,7 @@ async fn run_with_install_flag_against_unavailable_component() {
     let trip = this_host_tuple();
     make_component_unavailable(&cx.config, "rust-std", trip);
     cx.config
-        .expect([
-            "rustup",
-            "run",
-            "--install",
-            "nightly",
-            "rustc",
-            "--version",
-        ])
+        .expect(["rustup", "run", "nightly", "rustc", "--version"])
         .await
         .with_stdout(snapbox::str![[r#"
 1.3.0 (hash-nightly-2)

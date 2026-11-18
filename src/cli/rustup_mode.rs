@@ -1,6 +1,6 @@
 use std::{
     env::consts::EXE_SUFFIX,
-    fmt,
+    fmt, fs,
     io::{self, Write},
     path::{Path, PathBuf},
     process::ExitStatus,
@@ -11,12 +11,12 @@ use std::{
 
 use anstream::ColorChoice;
 use anstyle::Style;
-use anyhow::{Context as _, Error, anyhow};
+use anyhow::{Context as _, Error, anyhow, bail};
 use clap::{
     Args, CommandFactory, Parser, Subcommand, ValueEnum,
     builder::{PossibleValue, ValueHint},
 };
-use clap_cargo::style::{CONTEXT, ERROR, GOOD, HEADER, TRANSIENT, WARN};
+use clap_cargo::style::{ERROR, GOOD, TRANSIENT, WARN};
 use clap_complete::Shell;
 use futures_util::stream::StreamExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -31,14 +31,14 @@ use crate::{
         completions, docs,
         help::{
             check_help, completions_help, doc_help, install_help, official_toolchain_arg_help,
-            resolvable_local_toolchain_arg_help, resolvable_toolchain_arg_help, run_help,
-            rustup_help, show_active_toolchain_help, show_help, toolchain_help,
-            toolchain_install_help, toolchain_link_help, topic_arg_help, update_help,
+            resolvable_toolchain_arg_help, run_help, rustup_help, show_active_toolchain_help,
+            show_help, toolchain_help, toolchain_install_help, toolchain_link_help, topic_arg_help,
+            update_help,
         },
         self_update,
     },
     command, component_for_bin,
-    config::{ActiveSource, Cfg, OverrideFile},
+    config::{ActiveSource, Cfg, OverrideFile, no_toolchain_error},
     dist::{
         DistOptions, PartialChannelToolchainName, Profile, Switch, TargetTuple,
         download::DownloadCfg,
@@ -46,11 +46,10 @@ use crate::{
     },
     errors::RustupError,
     install::{InstallMethod, UpdateStatus},
-    process::{ColorableTerminal, Process},
+    process::Process,
     toolchain::{
-        ChannelToolchain, CustomToolchainName, Override,
-        PartialToolchainName, PartialToolchainNameOrPath, Toolchain, ToolchainName,
-        ToolchainNameOrPath,
+        ChannelToolchain, CustomToolchainName, Override, PartialToolchainName,
+        PartialToolchainNameOrPath, Toolchain, ToolchainNameExt, ToolchainNameOrPath,
     },
     utils::{self, ExitCode},
 };
@@ -148,13 +147,9 @@ enum RustupSubcmd {
         subcmd: ToolchainSubcmd,
     },
 
-    /// Show the active and installed toolchains or profiles
-    #[command(after_help = show_help())]
+    /// Print the toolchain selected for the current directory
+    #[command(alias = "resolve", after_help = show_help())]
     Show {
-        /// Enable verbose output with rustc information for all installed toolchains
-        #[arg(short, long)]
-        verbose: bool,
-
         #[command(subcommand)]
         subcmd: Option<ShowSubcmd>,
     },
@@ -202,18 +197,12 @@ enum RustupSubcmd {
         subcmd: ComponentSubcmd,
     },
 
-    /// Run a command with an environment configured for a given toolchain
+    /// Run a command under a toolchain
     #[command(after_help = run_help(), trailing_var_arg = true)]
     Run {
-        #[arg(help = resolvable_local_toolchain_arg_help())]
-        toolchain: PartialToolchainNameOrPath,
-
-        #[arg(required = true, num_args = 1..)]
-        command: Vec<String>,
-
-        /// Install the requested toolchain if needed
-        #[arg(long)]
-        install: bool,
+        /// Toolchain name and command, or a command resolved from rust-toolchain.toml
+        #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
 
     /// Display which binary will be run for a given command
@@ -395,6 +384,12 @@ enum ToolchainSubcmd {
 
         /// Path to the directory
         path: PathBuf,
+    },
+
+    /// Remove a linked custom toolchain name
+    Unlink {
+        /// Custom toolchain name
+        toolchain: CustomToolchainName,
     },
 
     /// Write the active toolchain as an override file
@@ -652,8 +647,8 @@ pub async fn main(
         RustupSubcmd::DumpTestament => common::dump_testament(process),
         RustupSubcmd::Install { opts } => update(cfg, opts, true).await,
         RustupSubcmd::Uninstall { opts } => toolchain_remove(cfg, opts).await,
-        RustupSubcmd::Show { verbose, subcmd } => handle_epipe(match subcmd {
-            None => show(cfg, verbose).await,
+        RustupSubcmd::Show { subcmd } => handle_epipe(match subcmd {
+            None => show(cfg),
             Some(ShowSubcmd::ActiveToolchain { verbose }) => {
                 show_active_toolchain(cfg, verbose).await
             }
@@ -692,6 +687,7 @@ pub async fn main(
             ToolchainSubcmd::Link { toolchain, path } => {
                 toolchain_link(cfg, &toolchain, &path).await
             }
+            ToolchainSubcmd::Unlink { toolchain } => toolchain_unlink(cfg, &toolchain),
             ToolchainSubcmd::Uninstall { opts } => toolchain_remove(cfg, opts).await,
             ToolchainSubcmd::Pin { qualified } => pin_active_toolchain(qualified, cfg),
         },
@@ -724,13 +720,7 @@ pub async fn main(
                 target,
             } => component_remove(cfg, component, toolchain, target).await,
         },
-        RustupSubcmd::Run {
-            toolchain,
-            command,
-            install,
-        } => run(cfg, toolchain, command, install)
-            .await
-            .map(ExitCode::from),
+        RustupSubcmd::Run { args } => run(cfg, args).await.map(ExitCode::from),
         RustupSubcmd::Which { command, toolchain } => which(cfg, &command, toolchain).await,
         RustupSubcmd::Doc {
             path,
@@ -984,14 +974,64 @@ async fn update(
     Ok(exit_code)
 }
 
-async fn run(
+fn split_run_args(
     cfg: &Cfg<'_>,
-    toolchain: PartialToolchainNameOrPath,
-    command: Vec<String>,
-    install: bool,
-) -> anyhow::Result<ExitStatus> {
-    let toolchain = toolchain.complete(&cfg.default_host_tuple()?)?;
-    let toolchain = Toolchain::from_local(toolchain, install, cfg).await?;
+    args: &[String],
+) -> anyhow::Result<(Option<PartialToolchainNameOrPath>, Vec<String>)> {
+    let Some((first, rest)) = args.split_first() else {
+        bail!("rustup run requires a command");
+    };
+
+    // A leading +name, -name, or path is an explicit toolchain argument.
+    // An uninstalled custom name is the command, so `rustup run cargo build`
+    // resolves from rust-toolchain.toml instead of looking up a toolchain
+    // called cargo.
+    if first.starts_with(['+', '-']) || first.contains(['/', '\\']) {
+        let toolchain = PartialToolchainNameOrPath::from_str(first)?;
+        if rest.is_empty() {
+            bail!("rustup run requires a command");
+        }
+        return Ok((Some(toolchain), rest.to_vec()));
+    }
+
+    if let Ok(parsed) = PartialToolchainNameOrPath::from_str(first) {
+        let explicit = match parsed {
+            PartialToolchainNameOrPath::Path(_) => true,
+            PartialToolchainNameOrPath::Named(PartialToolchainName::Channel(_)) => true,
+            PartialToolchainNameOrPath::Named(PartialToolchainName::Custom(ref custom)) => {
+                ToolchainNameOrPath::from(custom.clone())
+                    .path(cfg)
+                    .symlink_metadata()
+                    .is_ok()
+            }
+        };
+        if explicit {
+            if rest.is_empty() {
+                bail!("rustup run requires a command");
+            }
+            return Ok((
+                Some(PartialToolchainNameOrPath::from_str(first)?),
+                rest.to_vec(),
+            ));
+        }
+    }
+
+    Ok((None, args.to_vec()))
+}
+
+async fn run(cfg: &Cfg<'_>, args: Vec<String>) -> anyhow::Result<ExitStatus> {
+    let (toolchain, command) = split_run_args(cfg, &args)?;
+    let toolchain = match toolchain {
+        Some(toolchain) => {
+            let toolchain = toolchain.complete(&cfg.default_host_tuple()?)?;
+            Toolchain::from_local(toolchain, true, cfg).await?.inner
+        }
+        None => {
+            let (name, source) = cfg.ensure_active_toolchain(false, false).await?;
+            name.warn_auto_install(cfg.process);
+            Toolchain::with_source(cfg, name.inner, &source)?
+        }
+    };
     let cmd = toolchain.command(&command[0])?;
     command::run_command_for_dir(cmd, &command[0], &command[1..])
 }
@@ -1034,130 +1074,11 @@ async fn which(
     ))
 }
 
-#[tracing::instrument(level = "trace", skip_all)]
-async fn show(cfg: &Cfg<'_>, verbose: bool) -> anyhow::Result<ExitCode> {
-    common::warn_if_host_is_emulated(cfg.process);
-
-    let t = cfg.process.stdout();
-
-    // Print host tuple
-    writeln!(
-        t.lock(),
-        "{HEADER}Default host: {HEADER:#}{}",
-        cfg.default_host_tuple()?
-    )?;
-
-    // Print rustup home directory
-    {
-        let mut t = t.lock();
-        writeln!(
-            t,
-            "{HEADER}rustup home:  {HEADER:#}{}",
-            cfg.rustup_dir.display()
-        )?;
-        writeln!(t)?;
-    }
-
-    let mut installed_toolchains = cfg.list_toolchains(cfg.quiet)?;
-    installed_toolchains.sort();
-    let active_toolchain_and_source: Option<(ToolchainName, ActiveSource)> =
-        if let Ok(Some((ToolchainNameOrPath::Named(toolchain_name), source))) =
-            cfg.maybe_ensure_active_toolchain(None).await
-        {
-            Some((toolchain_name, source))
-        } else {
-            None
-        };
-
-    let (active_toolchain_name, _active_source) = active_toolchain_and_source
-        .as_ref()
-        .map(|atar| (&atar.0, &atar.1))
-        .unzip();
-
-    // show installed toolchains
-    print_header(&t, "installed toolchains")?;
-
-    let last_index = installed_toolchains.len().wrapping_sub(1);
-    for (n, toolchain_name) in installed_toolchains.into_iter().enumerate() {
-        let is_active_toolchain = active_toolchain_name == Some(&toolchain_name);
-        let status_str = if is_active_toolchain { " (active)" } else { "" };
-
-        let mut t = t.lock();
-
-        writeln!(t, "{toolchain_name}{CONTEXT}{status_str}{CONTEXT:#}")?;
-
-        if verbose {
-            let toolchain = Toolchain::new(cfg, toolchain_name.into())?;
-            writeln!(
-                t,
-                "  {}\n  path: {}",
-                toolchain.rustc_version(),
-                toolchain.path().display()
-            )?;
-            if n != last_index {
-                writeln!(t)?;
-            }
-        }
-    }
-
-    // show active toolchain
-    writeln!(t.lock())?;
-
-    print_header(&t, "active toolchain")?;
-
-    let Some((active_toolchain_name, active_source)) = active_toolchain_and_source else {
-        writeln!(t.lock(), "no active toolchain")?;
-        return Ok(ExitCode::SUCCESS);
+fn show(cfg: &Cfg<'_>) -> anyhow::Result<ExitCode> {
+    let Some((name, _)) = cfg.active_toolchain()? else {
+        return Err(no_toolchain_error(cfg.process));
     };
-
-    writeln!(t.lock(), "name: {active_toolchain_name}")?;
-    writeln!(t.lock(), "active because: {}", active_source.to_reason())?;
-
-    let active_toolchain = match Toolchain::new(cfg, active_toolchain_name.clone().into()) {
-        Ok(active_toolchain) => active_toolchain,
-        Err(
-            RustupError::ToolchainNotInstalled { .. } | RustupError::PathToolchainNotInstalled(..),
-        ) => {
-            info!("the active toolchain `{active_toolchain_name}` is not installed");
-            return Ok(ExitCode::SUCCESS);
-        }
-        Err(e) => return Err(e.into()),
-    };
-
-    if verbose {
-        writeln!(t.lock(), "compiler: {}", active_toolchain.rustc_version())?;
-        writeln!(t.lock(), "path: {}", active_toolchain.path().display())?;
-    }
-
-    // show installed targets for the active toolchain
-    writeln!(t.lock(), "installed targets:")?;
-
-    let active_toolchain_targets = match active_toolchain_name {
-        ToolchainName::Channel(desc) => ChannelToolchain::new(cfg, desc)?
-            .components()?
-            .into_iter()
-            .filter_map(|c| {
-                (c.installed && c.component.short_name() == "rust-std")
-                    .then(|| c.component.target.expect("rust-std should have a target"))
-            })
-            .collect(),
-        ToolchainName::Custom(name) => {
-            Toolchain::new(cfg, ToolchainNameOrPath::Named(name.into()))?.installed_targets()?
-        }
-    };
-
-    for target in active_toolchain_targets {
-        writeln!(t.lock(), "  {target}")?;
-    }
-
-    fn print_header(t: &ColorableTerminal, text: &str) -> Result<(), Error> {
-        let divider = "-".repeat(text.len());
-        let mut term_lock = t.lock();
-        writeln!(term_lock, "{HEADER}{text}{HEADER:#}")?;
-        writeln!(term_lock, "{HEADER}{divider}{HEADER:#}")?;
-        Ok(())
-    }
-
+    writeln!(cfg.process.stdout().lock(), "{name}")?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -1413,6 +1334,18 @@ async fn toolchain_link(
     .install(None)
     .await?;
 
+    Ok(ExitCode::SUCCESS)
+}
+
+fn toolchain_unlink(cfg: &Cfg<'_>, toolchain: &CustomToolchainName) -> anyhow::Result<ExitCode> {
+    let path = ToolchainNameOrPath::from(toolchain.clone()).path(cfg);
+    let metadata = fs::symlink_metadata(&path)
+        .with_context(|| format!("no linked toolchain named '{toolchain}'"))?;
+    if !metadata.file_type().is_symlink() {
+        bail!("'{toolchain}' is not a linked custom toolchain");
+    }
+    utils::remove_dir("toolchain link", &path)?;
+    info!("unlinked toolchain {toolchain}");
     Ok(ExitCode::SUCCESS)
 }
 

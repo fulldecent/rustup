@@ -487,14 +487,10 @@ async fn install_sets_up_stable_unless_a_different_default_is_requested() {
         .await
         .is_ok();
     cx.config
-        .expect(["rustup", "run", "nightly", "rustc", "--version"])
+        .expect(["rustup", "toolchain", "list"])
         .await
-        .with_stderr(snapbox::str![[r#"
-error: toolchain 'nightly-[HOST_TUPLE]' is not installed
-help: run `rustup toolchain install nightly-[HOST_TUPLE]` to install it
-
-"#]])
-        .is_err();
+        .with_stdout(snapbox::str![""])
+        .is_ok();
 }
 
 #[tokio::test]
@@ -528,14 +524,13 @@ async fn install_sets_up_stable_unless_there_is_already_a_default() {
 "#]])
         .is_ok();
     cx.config
-        .expect(["rustup", "run", "stable", "rustc", "--version"])
+        .expect(["rustup", "toolchain", "list"])
         .await
-        .with_stderr(snapbox::str![[r#"
-error: toolchain 'stable-[HOST_TUPLE]' is not installed
-help: run `rustup toolchain install stable-[HOST_TUPLE]` to install it
+        .with_stdout(snapbox::str![[r#"
+nightly-[HOST_TUPLE] (active)
 
 "#]])
-        .is_err();
+        .is_ok();
 }
 
 #[tokio::test]

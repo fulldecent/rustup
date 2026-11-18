@@ -328,8 +328,6 @@ help: run 'rustup toolchain install stable' to download the latest stable releas
         .is_ok();
 }
 
-
-
 #[tokio::test]
 async fn plus_default_is_not_a_toolchain_name() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
@@ -344,41 +342,27 @@ error: 'default' is not a toolchain name
         .is_err();
 }
 
-
 #[tokio::test]
 async fn unknown_toolchain_name_suggestions() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    cx.config
-        .expect(["rustup", "run", "fable", "rustc"])
-        .await
-        .is_err()
-        .with_stderr(snapbox::str![[r#"
-error: toolchain 'fable' is not installed
-help: did you mean 'stable'?
-
-"#]]);
-
-    cx.config
-        .expect(["rustup", "run", "1.23.4.", "rustc"])
-        .await
-        .is_err()
-        .with_stderr(snapbox::str![[r#"
-error: toolchain '1.23.4.' is not installed
-help: official versioned channels take the form X.Y or X.Y.Z
-
-"#]]);
-
-    cx.config
-        .expect(["rustup", "run", "invalid-toolchain", "rustc"])
-        .await
-        .is_err()
-        .with_stderr(snapbox::str![[r#"
-error: toolchain 'invalid-toolchain' is not installed
-help: maybe you have mistyped the toolchain name?
-
-"#]]);
+    // An uninstalled custom name is the command, not a toolchain. With no
+    // rust-toolchain.toml, run fails the same way show does.
+    for args in [
+        ["rustup", "run", "fable", "rustc"],
+        ["rustup", "run", "1.23.4.", "rustc"],
+        ["rustup", "run", "invalid-toolchain", "rustc"],
+    ] {
+        cx.config
+            .expect(args)
+            .await
+            .with_stderr(snapbox::str![[r#"
+...
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
+...
+"#]])
+            .is_err();
+    }
 }
-
 
 #[tokio::test]
 async fn rustup_zstd() {
@@ -624,9 +608,8 @@ async fn link() {
         .expect(["rustup", "show"])
         .await
         .with_stdout(snapbox::str![[r#"
-...
-custom (active)
-...
+custom
+
 "#]])
         .is_ok();
     cx.config
@@ -642,11 +625,69 @@ custom (active)
         .expect(["rustup", "show"])
         .await
         .with_stdout(snapbox::str![[r#"
-...
-custom
-...
+nightly-[HOST_TUPLE]
+
 "#]])
         .is_ok();
+}
+
+#[tokio::test]
+async fn resolve_prints_the_selected_toolchain() {
+    let cx = CliTestContext::new(Scenario::SimpleV2).await;
+    cx.config
+        .expect(["rustup", "toolchain", "install", "stable"])
+        .await
+        .is_ok();
+    cx.config.pin("stable");
+    cx.config
+        .expect(["rustup", "resolve"])
+        .await
+        .with_stdout(snapbox::str![[r#"
+stable-[HOST_TUPLE]
+
+"#]])
+        .is_ok();
+}
+
+#[tokio::test]
+async fn run_without_toolchain_uses_toolchain_file() {
+    let cx = CliTestContext::new(Scenario::SimpleV2).await;
+    cx.config.pin("nightly");
+    cx.config
+        .expect(["rustup", "run", "rustc", "--version"])
+        .await
+        .with_stdout(snapbox::str![[r#"
+1.3.0 (hash-nightly-2)
+
+"#]])
+        .is_ok();
+}
+
+#[tokio::test]
+async fn toolchain_unlink_removes_the_name_only() {
+    let cx = CliTestContext::new(Scenario::SimpleV2).await;
+    let path = cx.config.customdir.join("custom-1");
+    let path_arg = path.to_string_lossy().into_owned();
+    cx.config
+        .expect(["rustup", "toolchain", "link", "custom", &path_arg])
+        .await
+        .is_ok();
+    let link = cx.config.rustupdir.join("toolchains").join("custom");
+    assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+    cx.config
+        .expect(["rustup", "toolchain", "unlink", "custom"])
+        .await
+        .is_ok();
+    assert!(
+        path.join("bin")
+            .join(format!("rustc{EXE_SUFFIX}"))
+            .is_file()
+    );
+    assert!(link.symlink_metadata().is_err());
+    cx.config
+        .expect(["rustup", "toolchain", "unlink", "custom"])
+        .await
+        .is_err();
 }
 
 // Issue #809. When we call the fallback cargo, when it in turn invokes
@@ -790,25 +831,12 @@ async fn show_toolchain_none() {
     cx.config
         .expect(["rustup", "show"])
         .await
-        .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
-        .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-
-active toolchain
-----------------
-no active toolchain
-
-"#]])
         .with_stderr(snapbox::str![[r#"
-warn: no toolchain installed
-help: run 'rustup toolchain install stable' to download the latest stable release of Rust, then name it in rust-toolchain.toml
-
+...
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
+...
 "#]])
-        .is_ok();
+        .is_err();
 }
 
 #[tokio::test]
@@ -824,19 +852,7 @@ async fn show_toolchain_default() {
         .await
         .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-nightly-[HOST_TUPLE] (active)
-
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by '[..]'
-installed targets:
-  [HOST_TUPLE]
+nightly-[HOST_TUPLE]
 
 "#]])
         .with_stderr(snapbox::str![[""]])
@@ -850,22 +866,16 @@ async fn show_no_default() {
         .expect(["rustup", "install", "nightly"])
         .await
         .is_ok();
-    
+
     cx.config
         .expect(["rustup", "show"])
         .await
-        .with_stdout(snapbox::str![[r#"
+        .with_stderr(snapbox::str![[r#"
 ...
-installed toolchains
---------------------
-nightly-[HOST_TUPLE]
-
-active toolchain
-----------------
-no active toolchain
-
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
+...
 "#]])
-        .is_ok();
+        .is_err();
 }
 
 #[tokio::test]
@@ -875,22 +885,12 @@ async fn show_no_default_active() {
         .expect(["rustup", "install", "nightly"])
         .await
         .is_ok();
-    
+
     cx.config
         .expect(["rustup", "+nightly", "show"])
         .await
         .with_stdout(snapbox::str![[r#"
-...
-installed toolchains
---------------------
-nightly-[HOST_TUPLE] (active)
-
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by +toolchain on the command line
-installed targets:
-  [HOST_TUPLE]
+nightly-[HOST_TUPLE]
 
 "#]])
         .is_ok();
@@ -913,20 +913,7 @@ async fn show_multiple_toolchains() {
         .await
         .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-stable-[HOST_TUPLE]
-nightly-[HOST_TUPLE] (active)
-
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by '[..]'
-installed targets:
-  [HOST_TUPLE]
+nightly-[HOST_TUPLE]
 
 "#]])
         .is_ok();
@@ -943,9 +930,14 @@ async fn notify_release_hint_at_most_once_per_day() {
         .expect(["rustup", "update", "stable"])
         .await
         .is_ok();
+    cx.config.pin("stable");
     cx.config
         .expect(["rustup", "show"])
         .await
+        .with_stdout(snapbox::str![[r#"
+stable-[HOST_TUPLE]
+
+"#]])
         .with_stderr(snapbox::str![[r#"
 hint: a new stable Rust release is available, run `rustup update stable` to install it
 
@@ -1008,9 +1000,14 @@ async fn notify_release_hint_skipped_for_recent_release() {
         .expect(["rustup", "update", "stable"])
         .await
         .is_ok();
+    cx.config.pin("stable");
     cx.config
         .expect(["rustup", "show"])
         .await
+        .with_stdout(snapbox::str![[r#"
+stable-[HOST_TUPLE]
+
+"#]])
         .with_stderr(snapbox::str![[""]])
         .is_ok();
 }
@@ -1038,20 +1035,7 @@ async fn show_multiple_targets() {
         .await
         .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-nightly-[MULTI_ARCH_I] (active)
-
-active toolchain
-----------------
-name: nightly-[MULTI_ARCH_I]
-active because: overridden by '[..]'
-installed targets:
-  [CROSS_ARCH_II]
-  [MULTI_ARCH_I]
+nightly-[MULTI_ARCH_I]
 
 "#]])
         .with_stderr(snapbox::str![[""]])
@@ -1094,21 +1078,7 @@ async fn show_multiple_toolchains_and_targets() {
         .await
         .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-stable-[MULTI_ARCH_I]
-nightly-[MULTI_ARCH_I] (active)
-
-active toolchain
-----------------
-name: nightly-[MULTI_ARCH_I]
-active because: overridden by '[..]'
-installed targets:
-  [CROSS_ARCH_II]
-  [MULTI_ARCH_I]
+nightly-[MULTI_ARCH_I]
 
 "#]])
         .with_stderr(snapbox::str![[""]])
@@ -1160,7 +1130,7 @@ async fn list_no_default_toolchain() {
         .expect(["rustup", "install", "nightly"])
         .await
         .is_ok();
-    
+
     cx.config
         .expect(["rustup", "toolchain", "list"])
         .await
@@ -1181,7 +1151,7 @@ async fn list_no_default_override_toolchain() {
         .is_ok();
     // Installing the first toolchain also selects it as the default.
     // Clear that so the file pin is the only reason it is active.
-    
+
     cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "toolchain", "list"])
@@ -1227,26 +1197,14 @@ async fn show_toolchain_override() {
         .is_ok();
     // Installing the first toolchain also selects it as the default.
     // Clear that so the file pin is the only reason it is active.
-    
+
     cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "show"])
         .await
         .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-nightly-[HOST_TUPLE] (active)
-
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by '[..]'
-installed targets:
-  [HOST_TUPLE]
+nightly-[HOST_TUPLE]
 
 "#]])
         .with_stderr(snapbox::str![[""]])
@@ -1276,20 +1234,7 @@ async fn show_toolchain_toolchain_file_override() {
         .await
         .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-stable-[HOST_TUPLE]
-nightly-[HOST_TUPLE] (active)
-
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by '[..]'
-installed targets:
-  [HOST_TUPLE]
+nightly-[HOST_TUPLE]
 
 "#]])
         .with_stderr(snapbox::str![[""]])
@@ -1327,21 +1272,7 @@ async fn show_toolchain_version_nested_file_override() {
         .await
         .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-stable-[HOST_TUPLE]
-beta-[HOST_TUPLE]
-nightly-[HOST_TUPLE] (active)
-
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by '[..]'
-installed targets:
-  [HOST_TUPLE]
+nightly-[HOST_TUPLE]
 
 "#]])
         .with_stderr(snapbox::str![[""]])
@@ -1362,33 +1293,14 @@ async fn show_toolchain_toolchain_file_override_not_installed() {
 
     raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
 
-    // I'm not sure this should really be erroring when the toolchain
-    // is not installed; just capturing the behavior.
     cx.config
         .expect_with_env(["rustup", "show"], [("RUSTUP_AUTO_INSTALL", "0")])
         .await
-        .extend_redactions([
-            ("[RUSTUP_DIR]", &cx.config.rustupdir.rustupdir),
-            ("[TOOLCHAIN_FILE]", &toolchain_file),
-        ])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-stable-[HOST_TUPLE]
-
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by '[TOOLCHAIN_FILE]'
+nightly-[HOST_TUPLE]
 
 "#]])
-        .with_stderr(snapbox::str![[r#"
-info: the active toolchain `nightly-[HOST_TUPLE]` is not installed
-
-"#]])
+        .with_stderr(snapbox::str![[""]])
         .is_ok();
 }
 
@@ -1409,21 +1321,11 @@ async fn show_toolchain_override_not_installed() {
         .await
         .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by '[..]'
+nightly-[HOST_TUPLE]
 
 "#]])
         .is_ok();
 }
-
 
 #[tokio::test]
 async fn override_set_unqualified_depends_on_default_host() {
@@ -1438,12 +1340,8 @@ async fn override_set_unqualified_depends_on_default_host() {
         .expect(["rustup", "show"])
         .await
         .with_stdout(snapbox::str![[r#"
-...
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by '[..]'
-...
+nightly-[HOST_TUPLE]
+
 "#]])
         .is_ok();
 
@@ -1455,12 +1353,8 @@ active because: overridden by '[..]'
         .expect(["rustup", "show"])
         .await
         .with_stdout(snapbox::str![[r#"
-...
-active toolchain
-----------------
-name: nightly-[CROSS_ARCH_I]
-active because: overridden by '[..]'
-...
+nightly-[CROSS_ARCH_I]
+
 "#]])
         .is_ok();
 }
@@ -1478,12 +1372,8 @@ async fn override_set_qualified_doesnt_depend_on_default_host() {
         .expect(["rustup", "show"])
         .await
         .with_stdout(snapbox::str![[r#"
-...
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by '[..]'
-...
+nightly-[HOST_TUPLE]
+
 "#]])
         .is_ok();
 
@@ -1495,12 +1385,8 @@ active because: overridden by '[..]'
         .expect(["rustup", "show"])
         .await
         .with_stdout(snapbox::str![[r#"
-...
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by '[..]'
-...
+nightly-[HOST_TUPLE]
+
 "#]])
         .is_ok();
 }
@@ -1523,20 +1409,7 @@ async fn show_ignores_rustup_toolchain_env() {
         .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
         .is_ok()
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-stable-[HOST_TUPLE] (active)
-nightly-[HOST_TUPLE]
-
-active toolchain
-----------------
-name: stable-[HOST_TUPLE]
-active because: overridden by '[..]'
-installed targets:
-  [HOST_TUPLE]
+stable-[HOST_TUPLE]
 
 "#]]);
 }
@@ -1553,20 +1426,17 @@ async fn show_does_not_install_from_rustup_toolchain_env() {
             ],
         )
         .await
-        .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
-        .is_ok()
-        .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-
-active toolchain
-----------------
-no active toolchain
-
-"#]]);
+        .with_stderr(snapbox::str![[r#"
+...
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
+...
+"#]])
+        .is_err();
+    cx.config
+        .expect(["rustup", "toolchain", "list"])
+        .await
+        .with_stdout(snapbox::str![[""]])
+        .is_ok();
 }
 
 #[tokio::test]
@@ -1595,10 +1465,10 @@ async fn show_with_verbose() {
     {
         let cx = cx.with_dist_dir(Scenario::SimpleV2);
         cx.config
-        .expect(["rustup", "toolchain", "install", "nightly"])
-        .await
-        .is_ok();
-    cx.config.pin("nightly");
+            .expect(["rustup", "toolchain", "install", "nightly"])
+            .await
+            .is_ok();
+        cx.config.pin("nightly");
     }
 
     let cx = cx.with_dist_dir(Scenario::ArchivesV2_2015_01_01);
@@ -1608,31 +1478,10 @@ async fn show_with_verbose() {
         .await
         .is_ok();
     config
-        .expect(["rustup", "show", "--verbose"])
+        .expect(["rustup", "show"])
         .await
-        .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-nightly-[HOST_TUPLE] (active)
-  1.3.0 (hash-nightly-2)
-  path: [RUSTUP_DIR]/toolchains/nightly-[HOST_TUPLE]
-
-nightly-2015-01-01-[HOST_TUPLE]
-  1.2.0 (hash-nightly-1)
-  path: [RUSTUP_DIR]/toolchains/nightly-2015-01-01-[HOST_TUPLE]
-
-active toolchain
-----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by '[..]'
-compiler: 1.3.0 (hash-nightly-2)
-path: [RUSTUP_DIR]/toolchains/nightly-[HOST_TUPLE]
-installed targets:
-  [HOST_TUPLE]
+nightly-[HOST_TUPLE]
 
 "#]])
         .with_stderr(snapbox::str![[""]])
@@ -1789,15 +1638,8 @@ async fn set_default_host() {
         .expect(["rustup", "set", "default-host", &this_host_tuple()])
         .await
         .is_ok();
-    cx.config
-        .expect(["rustup", "show"])
-        .await
-        .with_stdout(snapbox::str![[r#"
-...
-Default host: [HOST_TUPLE]
-...
-"#]])
-        .is_ok();
+    let settings = fs::read_to_string(cx.config.rustupdir.join("settings.toml")).unwrap();
+    assert!(settings.contains(&format!("default_host_tuple = \"{}\"", this_host_tuple())));
 }
 
 // #846
@@ -1836,10 +1678,10 @@ async fn update_doesnt_update_non_tracking_channels() {
     {
         let cx = cx.with_dist_dir(Scenario::SimpleV2);
         cx.config
-        .expect(["rustup", "toolchain", "install", "nightly"])
-        .await
-        .is_ok();
-    cx.config.pin("nightly");
+            .expect(["rustup", "toolchain", "install", "nightly"])
+            .await
+            .is_ok();
+        cx.config.pin("nightly");
     }
 
     let cx = cx.with_dist_dir(Scenario::ArchivesV2_2015_01_01);
@@ -1997,7 +1839,6 @@ async fn toolchain_uninstall_is_like_uninstall() {
             .is_ok();
     }
 
-    
     cx.config
         .expect(["rustup", "uninstall", "nightly"])
         .await
@@ -2005,17 +1846,12 @@ async fn toolchain_uninstall_is_like_uninstall() {
     cx.config
         .expect(["rustup", "show"])
         .await
-        .with_stdout(snapbox::str![[r#"
+        .with_stderr(snapbox::str![[r#"
 ...
-installed toolchains
---------------------
-
-active toolchain
-----------------
-no active toolchain
-
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
+...
 "#]])
-        .is_ok();
+        .is_err();
 }
 
 #[tokio::test]
@@ -2037,8 +1873,6 @@ async fn uninstall_multiple_toolchains_sequentially() {
             .await
             .is_ok();
     }
-
-    
 
     cx.config
         .expect([
@@ -2362,10 +2196,10 @@ async fn remove_multiple_components_best_effort() {
     ] {
         let cx = CliTestContext::new(Scenario::SimpleV2).await;
         cx.config
-        .expect(["rustup", "toolchain", "install", "nightly"])
-        .await
-        .is_ok();
-    cx.config.pin("nightly");
+            .expect(["rustup", "toolchain", "install", "nightly"])
+            .await
+            .is_ok();
+        cx.config.pin("nightly");
         cx.config
             .expect(&["rustup", "component", "add", "rust-src", "rust-analysis"])
             .await
@@ -2925,10 +2759,10 @@ async fn file_override_with_archive() {
     {
         let cx = cx.with_dist_dir(Scenario::SimpleV2);
         cx.config
-        .expect(["rustup", "toolchain", "install", "stable"])
-        .await
-        .is_ok();
-    cx.config.pin("stable");
+            .expect(["rustup", "toolchain", "install", "stable"])
+            .await
+            .is_ok();
+        cx.config.pin("stable");
     }
 
     let cx = cx.with_dist_dir(Scenario::ArchivesV2_2015_01_01);
@@ -2971,10 +2805,10 @@ async fn file_override_toml_format_select_installed_toolchain() {
     {
         let cx = cx.with_dist_dir(Scenario::SimpleV2);
         cx.config
-        .expect(["rustup", "toolchain", "install", "stable"])
-        .await
-        .is_ok();
-    cx.config.pin("stable");
+            .expect(["rustup", "toolchain", "install", "stable"])
+            .await
+            .is_ok();
+        cx.config.pin("stable");
     }
 
     let cx = cx.with_dist_dir(Scenario::ArchivesV2_2015_01_01);
@@ -3020,10 +2854,10 @@ async fn file_override_toml_format_install_both_toolchain_and_components() {
     {
         let cx = cx.with_dist_dir(Scenario::SimpleV2);
         cx.config
-        .expect(["rustup", "toolchain", "install", "stable"])
-        .await
-        .is_ok();
-    cx.config.pin("stable");
+            .expect(["rustup", "toolchain", "install", "stable"])
+            .await
+            .is_ok();
+        cx.config.pin("stable");
     }
 
     let cx = cx.with_dist_dir(Scenario::ArchivesV2_2015_01_01);
@@ -3358,7 +3192,7 @@ async fn override_order() {
         .is_ok();
 
     // No default
-    
+
     cx.config
         .expect(["rustup", "show", "active-toolchain"])
         .await
@@ -3480,7 +3314,6 @@ toolchain-file
 "#]]);
 }
 
-
 #[tokio::test]
 async fn rustup_toolchain_source_toolchain_file() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
@@ -3495,8 +3328,6 @@ toolchain-file
 
 "#]]);
 }
-
-
 
 #[tokio::test]
 async fn rustup_toolchain_env_does_not_beat_file() {
@@ -3971,10 +3802,10 @@ async fn check_host_goes_away() {
     {
         let cx = cx.with_dist_dir(Scenario::HostGoesMissingBefore);
         cx.config
-        .expect(["rustup", "toolchain", "install", "nightly"])
-        .await
-        .is_ok();
-    cx.config.pin("nightly");
+            .expect(["rustup", "toolchain", "install", "nightly"])
+            .await
+            .is_ok();
+        cx.config.pin("nightly");
     }
 
     let cx = cx.with_dist_dir(Scenario::HostGoesMissingAfter);
@@ -3990,7 +3821,6 @@ help: see <https://doc.rust-lang.org/nightly/rustc/platform-support.html> for av
 "#]])
         .is_ok();
 }
-
 
 #[tokio::test]
 async fn deny_incompatible_toolchain_install() {
@@ -4008,7 +3838,6 @@ note: add the `--force-non-host` flag to install the toolchain anyway
 "#]])
         .is_err();
 }
-
 
 #[tokio::test]
 async fn dont_warn_on_partial_build() {
@@ -4239,20 +4068,7 @@ async fn show_custom_toolchain() {
         .await
         .extend_redactions([("[RUSTUP_DIR]", cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-stable-[HOST_TUPLE]
-stuff (active)
-
-active toolchain
-----------------
-name: stuff
-active because: overridden by +toolchain on the command line
-installed targets:
-  [HOST_TUPLE]
+stuff
 
 "#]])
         .with_stderr(snapbox::str![[""]])
@@ -4290,19 +4106,7 @@ async fn show_custom_toolchain_without_components_file() {
         .await
         .extend_redactions([("[RUSTUP_DIR]", cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-stable-[HOST_TUPLE]
-stuff (active)
-
-active toolchain
-----------------
-name: stuff
-active because: overridden by +toolchain on the command line
-installed targets:
+stuff
 
 "#]])
         .with_stderr(snapbox::str![[""]])
@@ -4382,10 +4186,6 @@ fn nightly_manifest_path(cx: &CliTestContext) -> PathBuf {
         .join("multirust-channel-manifest.toml")
 }
 
-
-
-
-
 #[tokio::test]
 async fn pin_env_plus_override() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
@@ -4433,14 +4233,11 @@ channel = "beta-[HOST_TUPLE]"
 
 "#]],
     );
-
 }
 
 #[tokio::test]
 async fn pin_invalid_active_toolchain() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
-
-    
 
     cx.config
         .expect(["rustup", "toolchain", "pin"])

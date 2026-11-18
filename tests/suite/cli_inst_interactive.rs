@@ -207,12 +207,12 @@ async fn with_no_toolchain() {
     cx.config
         .expect(["rustup", "show"])
         .await
-        .with_stdout(snapbox::str![[r#"
+        .with_stderr(snapbox::str![[r#"
 ...
-no active toolchain
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
 ...
 "#]])
-        .is_ok();
+        .is_err();
 }
 
 #[tokio::test]
@@ -269,13 +269,13 @@ async fn with_non_default_toolchain_still_prompts() {
     cx.config
         .expect(["rustup", "show"])
         .await
-        .with_stdout(snapbox::str![[r#"
+        .with_stderr(snapbox::str![[r#"
 ...
-no active toolchain
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
 ...
 "#]])
         .without_stdout("nightly")
-        .is_ok();
+        .is_err();
 }
 
 #[tokio::test]
@@ -295,13 +295,13 @@ async fn with_non_release_channel_non_default_toolchain() {
     cx.config
         .expect(["rustup", "show"])
         .await
-        .with_stdout(snapbox::str![[r#"
+        .with_stderr(snapbox::str![[r#"
 ...
-no active toolchain
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
 ...
 "#]])
         .without_stdout("nightly")
-        .is_ok();
+        .is_err();
 }
 
 #[tokio::test]
@@ -317,12 +317,12 @@ async fn set_nightly_toolchain() {
     cx.config
         .expect(["rustup", "show"])
         .await
-        .with_stdout(snapbox::str![[r#"
+        .with_stderr(snapbox::str![[r#"
 ...
-no active toolchain
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
 ...
 "#]])
-        .is_ok();
+        .is_err();
 }
 
 #[tokio::test]
@@ -353,12 +353,12 @@ async fn set_nightly_toolchain_and_unset() {
     cx.config
         .expect(["rustup", "show"])
         .await
-        .with_stdout(snapbox::str![[r#"
+        .with_stderr(snapbox::str![[r#"
 ...
-no active toolchain
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
 ...
 "#]])
-        .is_ok();
+        .is_err();
 }
 
 #[tokio::test]
@@ -633,7 +633,6 @@ This copies the rustup binary into place and records install metadata.
 #[tokio::test]
 async fn install_defaults_to_default_host() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    let redactions = [("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())];
 
     cx.config
         .expect([
@@ -645,23 +644,18 @@ async fn install_defaults_to_default_host() {
         .await
         .is_ok();
 
+    let settings = fs::read_to_string(cx.config.rustupdir.join("settings.toml")).unwrap();
+    assert!(settings.contains(&format!("default_host_tuple = \"{}\"", this_host_tuple())));
+
     cx.config
         .expect(["rustup", "show"])
         .await
-        .extend_redactions(redactions)
-        .is_ok()
-        .with_stdout(snapbox::str![[r#"
-Default host: [HOST_TUPLE]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-
-active toolchain
-----------------
-no active toolchain
-
-"#]]);
+        .with_stderr(snapbox::str![[r#"
+...
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
+...
+"#]])
+        .is_err();
 
     cx.config
         .expect(["rustup", "set", "default-host", CROSS_ARCH1])
@@ -669,21 +663,16 @@ no active toolchain
         .is_ok()
         .with_stdout(snapbox::str![[r#""#]]);
 
+    let settings = fs::read_to_string(cx.config.rustupdir.join("settings.toml")).unwrap();
+    assert!(settings.contains(&format!("default_host_tuple = \"{CROSS_ARCH1}\"")));
+
     cx.config
         .expect_with_env(["rustup", "show"], [("RUSTUP_AUTO_INSTALL", "0")])
         .await
-        .extend_redactions(redactions)
-        .is_ok()
-        .with_stdout(snapbox::str![[r#"
-Default host: [CROSS_ARCH_I]
-rustup home:  [RUSTUP_DIR]
-
-installed toolchains
---------------------
-
-active toolchain
-----------------
-no active toolchain
-
-"#]]);
+        .with_stderr(snapbox::str![[r#"
+...
+error: rustup could not choose a version of rustup to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
+...
+"#]])
+        .is_err();
 }

@@ -191,6 +191,11 @@ async fn update_works_without_term() {
 #[tokio::test]
 async fn show_works_with_dumb_term() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
+    cx.config
+        .expect(["rustup", "toolchain", "install", "stable"])
+        .await
+        .is_ok();
+    cx.config.pin("stable");
     let mut cmd = cx.config.cmd("rustup", ["show"]);
     cx.config.env(&mut cmd);
     cmd.env("TERM", "dumb");
@@ -561,7 +566,7 @@ help: if you built this toolchain from source, and used `rustup toolchain link`,
 }
 
 #[tokio::test]
-async fn rustup_run_not_installed() {
+async fn rustup_run_installs_when_missing() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect(["rustup", "install", "stable"])
@@ -570,12 +575,11 @@ async fn rustup_run_not_installed() {
     cx.config
         .expect(["rustup", "run", "nightly", "rustc", "--version"])
         .await
-        .with_stderr(snapbox::str![[r#"
-error: toolchain 'nightly-[HOST_TUPLE]' is not installed
-help: run `rustup toolchain install nightly-[HOST_TUPLE]` to install it
+        .with_stdout(snapbox::str![[r#"
+1.3.0 (hash-nightly-2)
 
 "#]])
-        .is_err();
+        .is_ok();
 }
 
 #[tokio::test]
@@ -586,14 +590,7 @@ async fn rustup_run_install() {
         .await
         .is_ok();
     cx.config
-        .expect([
-            "rustup",
-            "run",
-            "--install",
-            "nightly",
-            "cargo",
-            "--version",
-        ])
+        .expect(["rustup", "run", "nightly", "cargo", "--version"])
         .await
         .is_ok();
     cx.config
@@ -1516,9 +1513,8 @@ async fn override_by_toolchain_on_the_command_line() {
         .expect(["rustup", "+nightly", "show"])
         .await
         .with_stdout(snapbox::str![[r#"
-...
-active because: overridden by +toolchain on the command line
-...
+nightly-[HOST_TUPLE]
+
 "#]])
         .is_ok();
     cx.config
