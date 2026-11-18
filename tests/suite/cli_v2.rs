@@ -2067,7 +2067,7 @@ help: which you can find at <https://rust-lang.github.io/rustup-components-histo
 help: after determining the correct date, install it with a command such as:
 help:     rustup toolchain install nightly-2018-12-27
 help: then you can use the toolchain with commands such as:
-help:     cargo +nightly-2018-12-27 build
+help:     rustup run nightly-2018-12-27 cargo build
 
 "#]])
         .is_err();
@@ -2093,7 +2093,7 @@ help: which you can find at <https://rust-lang.github.io/rustup-components-histo
 help: after determining the correct date, install it with a command such as:
 help:     rustup toolchain install nightly-2018-12-27
 help: then you can use the toolchain with commands such as:
-help:     cargo +nightly-2018-12-27 build
+help:     rustup run nightly-2018-12-27 cargo build
 
 "#]])
         .is_err();

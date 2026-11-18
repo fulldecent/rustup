@@ -2,24 +2,25 @@
 
 ## How rustup works
 
-`rustup` installs and manages many Rust toolchains. A command selects one
-toolchain in this order:
+`rustup` installs and manages many Rust toolchains. A rustup command selects
+one toolchain in this order:
 
-1. A `+toolchain` argument, as in `rustup run nightly cargo build`.
+1. An in-line specification on that command, such as
+   `rustup +nightly run cargo build` or `rustup run nightly cargo build`.
 2. The nearest `rust-toolchain.toml`, walking from the current directory
    toward the filesystem root.
 
 If neither is present, the command exits with an error.
 
-Run a tool with `rustup run`, for example `rustup run cargo build` or
-`rustup run rustc --version`. `rustup run` installs a missing channel from
-that selection and puts the toolchain's binaries and libraries on the child
-process path.
+`rustup run` installs a missing channel from that selection and puts the
+toolchain's binaries and libraries on the child process path. With no
+toolchain argument, as in `rustup run cargo build`, the file walk above
+supplies the toolchain.
 
-The installer copies only the `rustup` binary. If that binary is invoked
-under another name, such as [`rustc`] or [`cargo`], the invocation is a
-[proxy][proxies]: it uses the same two rules, then runs the matching binary from
-the selected toolchain. Those names exist only when you create them.
+The installer copies only the `rustup` binary. Invoking that binary under
+another name, such as [`rustc`] or [`cargo`], makes a [shim][proxies]. The
+same two rules apply. A shim is not recommended. The installer does not
+create one, and these instructions do not ask you to put one on `PATH`.
 
 This is similar to Ruby's [rbenv], Python's [pyenv], or Node's [nvm].
 
@@ -55,9 +56,10 @@ This is similar to Ruby's [rbenv], Python's [pyenv], or Node's [nvm].
   "profile" defines a grouping of components. See the [Profiles] chapter for
   more details.
 
-- **proxy** --- The rustup binary invoked under the name of a Rust tool, such as
-  `rustc` or `cargo`. It forwards that command to the selected toolchain. See
-  the [Proxies] chapter for the names rustup recognizes.
+- **shim** --- The rustup binary invoked under the name of a Rust tool, such as
+  `rustc` or `cargo`. It forwards that command to the selected toolchain. A
+  shim is not recommended. See the [Proxies] chapter for the names rustup
+  recognizes.
 
 [`clippy`]: https://github.com/rust-lang/rust-clippy
 [components]: components.md

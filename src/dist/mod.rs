@@ -90,7 +90,7 @@ fn components_missing_msg(cs: &[Component], manifest: &ManifestV2, toolchain: &s
         help: after determining the correct date, install it with a command such as:\n\
         help:     rustup toolchain install nightly-2018-12-27\n\
         help: then you can use the toolchain with commands such as:\n\
-        help:     cargo +nightly-2018-12-27 build"
+        help:     rustup run nightly-2018-12-27 cargo build"
         );
     } else if ["beta", "stable"].iter().any(|&p| toolchain.starts_with(p)) {
         let _ = write!(

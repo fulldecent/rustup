@@ -1,15 +1,11 @@
 # Overrides
 
-`rustup` determines which [toolchain] to use when one of the
-installed commands like `rustc` is executed. There are several ways to
-select that toolchain:
+A rustup command selects a [toolchain] in this order:
 
-1. A [toolchain override shorthand] used on the command-line, such as `cargo
-+beta`.
-2. The [`rust-toolchain.toml`] file.
+1. An in-line specification on that command, such as `rustup +nightly run cargo build` or `rustup run nightly cargo build`. See [toolchain override shorthand].
+2. The nearest [`rust-toolchain.toml`] file.
 
-The toolchain is chosen in the order listed above, using the first one that is
-specified. `rust-toolchain.toml` is discovered by walking from the current
+`rust-toolchain.toml` is discovered by walking from the current
 directory toward the filesystem root, and the nearest file wins. If neither
 is present, the command fails.
 
@@ -21,15 +17,22 @@ is present, the command fails.
 
 ## Toolchain override shorthand
 
-The `rustup` toolchain proxies can be instructed directly to use a specific
-toolchain, a convenience for developers who often test different toolchains.
-If the first argument to `cargo`, `rustc` or other tools in the toolchain
-begins with `+`, it will be interpreted as a `rustup` toolchain name, and that
-toolchain will be preferred, as in
+An in-line toolchain on a rustup command looks like this:
+
+```console
+rustup +beta run cargo test
+rustup run beta cargo test
+```
+
+The rustup binary can also be invoked under another name, such as `cargo` or
+`rustc`. A leading `+toolchain` argument is recognized there too:
 
 ```console
 cargo +beta test
 ```
+
+That name is a shim. A shim is not recommended. The installer does not create
+shims, and these instructions do not ask you to put a shim on `PATH`.
 
 ## The toolchain file
 

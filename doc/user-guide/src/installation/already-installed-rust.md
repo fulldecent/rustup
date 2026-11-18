@@ -12,8 +12,8 @@ rustup toolchain link system /usr
 ```
 
 `system` is then a toolchain name, the same way `nightly` is. For example,
-`cargo +system build` uses the linked install when that `cargo` is rustup,
-and `cargo +nightly build` uses nightly.
+`rustup +system run cargo build` uses the linked install, and
+`rustup run nightly cargo build` uses nightly.
 
 To develop with the system toolchain, name it in `rust-toolchain.toml`:
 
