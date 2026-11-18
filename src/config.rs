@@ -113,7 +113,6 @@ impl<T: Into<String>> From<T> for OverrideFile {
 pub(crate) enum ActiveSource {
     Default,
     CommandLine,
-    OverrideDb(PathBuf),
     ToolchainFile(PathBuf),
 }
 
@@ -122,7 +121,6 @@ impl ActiveSource {
         match self {
             Self::Default => String::from("it's the default toolchain"),
             Self::CommandLine => String::from("overridden by +toolchain on the command line"),
-            Self::OverrideDb(path) => format!("directory override for '{}'", path.display()),
             Self::ToolchainFile(path) => format!("overridden by '{}'", path.display()),
         }
     }
@@ -133,7 +131,6 @@ impl Display for ActiveSource {
         f.write_str(match self {
             Self::Default => "default",
             Self::CommandLine => "cli",
-            Self::OverrideDb(_) => "path-override",
             Self::ToolchainFile(_) => "toolchain-file",
         })
     }
@@ -644,9 +641,7 @@ impl<'a> Cfg<'a> {
             if let Some(name) = &self.toolchain_override {
                 Some((name.clone().resolve(self)?.into(), ActiveSource::CommandLine))
             }
-            // Then walk up the directory tree from 'path' looking for either the
-            // directory in the override database, or a `rust-toolchain.toml` file,
-            // in that order.
+            // Then walk up the directory tree looking for a `rust-toolchain.toml` file.
             else if let Some((override_cfg, active_source)) = self.settings_file.with(|s| {
                     self.find_override_from_dir_walk(&self.current_dir, s)
                 })? {
@@ -665,22 +660,10 @@ impl<'a> Cfg<'a> {
         dir: &Path,
         settings: &Settings,
     ) -> anyhow::Result<Option<(OverrideCfg, ActiveSource)>> {
-        let overrides = settings.overrides_by_dir();
         let mut dir = Some(dir);
 
         while let Some(d) = dir {
-            // First check the override database
-            if let Some(name) = overrides.get(d) {
-                let source = ActiveSource::OverrideDb(d.to_owned());
-                return Ok(Some((
-                    Override::<PartialToolchainName>::from_str(name)?
-                        .resolve(self)?
-                        .into(),
-                    source,
-                )));
-            }
-
-            // Then look for `rust-toolchain.toml`. A plain `rust-toolchain` file is not a pin.
+            // Look for `rust-toolchain.toml`. A plain `rust-toolchain` file is not a pin.
             let toolchain_file = d.join("rust-toolchain.toml");
 
             if let Ok(contents) = utils::read_file("toolchain file", &toolchain_file) {
@@ -991,18 +974,6 @@ impl<'a> Cfg<'a> {
         // See: <https://users.rust-lang.org/t/cannot-call-vec-sort-by-key-without-cloning-data/60455/4>
         channels.sort_by(|n, m| n.desc().cmp(m.desc()));
         Ok(channels)
-    }
-
-    /// Create an override for a toolchain
-    pub(crate) fn make_override(
-        &self,
-        path: &Path,
-        toolchain: &impl Display,
-    ) -> anyhow::Result<()> {
-        self.settings_file.with_mut(|s| {
-            s.add_override(path, toolchain.to_string());
-            Ok(())
-        })
     }
 
     pub(crate) fn set_default_host_tuple(&self, host_tuple: String) -> anyhow::Result<()> {

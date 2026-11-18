@@ -154,46 +154,14 @@ pub(crate) fn toolchain_link_help() -> String {
   compiler versions as follows:
 
     {LITERAL}$ rustup toolchain link latest-stage1 build/x86_64-unknown-linux-gnu/stage1{LITERAL:#}
-    {LITERAL}$ rustup override set latest-stage1{LITERAL:#}
+
+  Then name that toolchain in `rust-toolchain.toml`:
+
+    {LITERAL}[toolchain]{LITERAL:#}
+    {LITERAL}channel = 'latest-stage1'{LITERAL:#}
 
   If you now compile a crate in the current directory, the custom
   toolchain 'latest-stage1' will be used."
-    )
-}
-
-pub(crate) fn override_help() -> String {
-    format!(
-        r"{HEADER}Discussion:{HEADER:#}
-  Overrides configure Rustup to use a specific toolchain when
-  running in a specific directory.
-
-  Directories can be assigned their own Rust toolchain with `rustup
-  override`. When a directory has an override then any time `rustc`
-  or `cargo` is run inside that directory, or one of its child
-  directories, the override toolchain will be invoked.
-
-  To pin to a specific nightly:
-
-    {LITERAL}$ rustup override set nightly-2014-12-18{LITERAL:#}
-
-  Or a specific stable release:
-
-    {LITERAL}$ rustup override set 1.0.0{LITERAL:#}
-
-  To see the active toolchain use `rustup show`. To remove the
-  override and use the default toolchain again, `rustup override
-  unset`."
-    )
-}
-
-pub(crate) fn override_unset_help() -> String {
-    format!(
-        r"{HEADER}Discussion:{HEADER:#}
-  If `--path` argument is present, removes the override toolchain
-  for the specified directory. If `--nonexistent` argument is
-  present, removes the override toolchain for all nonexistent
-  directories. Otherwise, removes the override toolchain for the
-  current directory."
     )
 }
 

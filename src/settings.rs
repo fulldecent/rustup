@@ -1,15 +1,13 @@
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     fmt,
-    path::{Path, PathBuf},
+    path::PathBuf,
     str::FromStr,
 };
 
 use anyhow::Context;
-use same_file::Handle;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
 use crate::{
     cli::self_update::SelfUpdateMode,
@@ -105,70 +103,12 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub(crate) fn remove_override(&mut self, path: &Path) -> bool {
-        let mut removed = self.overrides.remove(&path.display().to_string()).is_some();
-        // The directory may also be stored under other paths that lead to it.
-        if let Ok(dir) = Handle::from_path(path) {
-            let count = self.overrides.len();
-            self.overrides.retain(|stored, _| !leads_to(stored, &dir));
-            removed |= self.overrides.len() < count;
-        }
-        removed
-    }
-
-    pub(crate) fn add_override(&mut self, path: &Path, toolchain: String) {
-        let key = path.display().to_string();
-        // Drop every entry stored for this directory under any path, so that
-        // the one inserted below under `key` is its only override.
-        if let Ok(dir) = Handle::from_path(path) {
-            self.overrides.retain(|stored, _| !leads_to(stored, &dir));
-        }
-        info!(
-            "override toolchain for {} set to {toolchain}",
-            path.display(),
-        );
-        self.overrides.insert(key, toolchain);
-    }
-
-    /// Indexes the overrides by the directories they refer to, for a series of lookups.
-    pub(crate) fn overrides_by_dir(&self) -> OverridesByDir<'_> {
-        let mut by_dir = HashMap::new();
-        for (path, toolchain) in &self.overrides {
-            // A directory that cannot be opened cannot be the current one either.
-            if let Ok(dir) = Handle::from_path(path) {
-                by_dir.entry(dir).or_insert_with(|| toolchain.as_str());
-            }
-        }
-        OverridesByDir { by_dir }
-    }
-
     pub(crate) fn parse(data: &str) -> anyhow::Result<Self> {
         toml::from_str(data).context("error parsing settings")
     }
 
     fn stringify(&self) -> anyhow::Result<String> {
         Ok(toml::to_string(self)?)
-    }
-}
-
-/// Whether `path` leads to the directory behind `dir`.
-fn leads_to(path: &str, dir: &Handle) -> bool {
-    Handle::from_path(path).is_ok_and(|other| other == *dir)
-}
-
-/// Overrides keyed by the identity of their directories rather than by their
-/// paths, so that an override applies however its directory is reached.
-pub(crate) struct OverridesByDir<'a> {
-    by_dir: HashMap<Handle, &'a str>,
-}
-
-impl OverridesByDir<'_> {
-    pub(crate) fn get(&self, dir: &Path) -> Option<&str> {
-        if self.by_dir.is_empty() {
-            return None;
-        }
-        let dir = Handle::from_path(dir).ok()?;
-        self.by_dir.get(&dir).copied()
     }
 }
 

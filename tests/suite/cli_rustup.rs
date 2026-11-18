@@ -409,10 +409,7 @@ async fn default_alias_directory_override_follows_default() {
         .expect(["rustup", "default", "beta"])
         .await
         .is_ok();
-    cx.config
-        .expect(["rustup", "override", "set", "default"])
-        .await
-        .is_ok();
+    cx.config.pin("default");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -482,16 +479,17 @@ async fn default_override() {
         .await
         .is_ok();
     cx.config
-        .expect(["rustup", "override", "set", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "default", "stable"])
         .await
         .with_stderr(snapbox::str![[r#"
 info: using existing install for stable-[HOST_TUPLE]
 info: default toolchain set to stable
-info: note that the toolchain 'nightly-[HOST_TUPLE]' is currently in use (directory override for '[..]')
+info: note that the toolchain 'nightly-[HOST_TUPLE]' is currently in use (overridden by '[..]')
 
 "#]])
         .is_ok();
@@ -1293,9 +1291,16 @@ nightly-[HOST_TUPLE]
 async fn list_no_default_override_toolchain() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "override", "set", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    // Installing the first toolchain also selects it as the default.
+    // Clear that so the file pin is the only reason it is active.
+    cx.config
+        .expect(["rustup", "default", "none"])
+        .await
+        .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "toolchain", "list"])
         .await
@@ -1315,9 +1320,10 @@ async fn list_default_and_override_toolchain() {
         .await
         .is_ok();
     cx.config
-        .expect(&["rustup", "override", "set", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(&["rustup", "toolchain", "list"])
         .await
@@ -1333,9 +1339,16 @@ nightly-[HOST_TUPLE] (active, default)
 async fn show_toolchain_override() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "override", "add", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    // Installing the first toolchain also selects it as the default.
+    // Clear that so the file pin is the only reason it is active.
+    cx.config
+        .expect(["rustup", "default", "none"])
+        .await
+        .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "show"])
         .await
@@ -1351,7 +1364,7 @@ nightly-[HOST_TUPLE] (active)
 active toolchain
 ----------------
 name: nightly-[HOST_TUPLE]
-active because: directory override for '[..]'
+active because: overridden by '[..]'
 installed targets:
   [HOST_TUPLE]
 
@@ -1500,9 +1513,10 @@ info: the active toolchain `nightly-[HOST_TUPLE]` is not installed
 async fn show_toolchain_override_not_installed() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "override", "add", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "toolchain", "remove", "nightly"])
         .await
@@ -1521,69 +1535,22 @@ installed toolchains
 active toolchain
 ----------------
 name: nightly-[HOST_TUPLE]
-active because: directory override for '[..]'
+active because: overridden by '[..]'
 
 "#]])
         .is_ok();
 }
 
-#[tokio::test]
-async fn override_set_unset_with_path() {
-    let mut cx = CliTestContext::new(Scenario::SimpleV2).await;
-    let cwd = fs::canonicalize(cx.config.current_dir()).unwrap();
-    let mut cwd_str = cwd.to_str().unwrap();
-
-    if cfg!(windows) {
-        cwd_str = &cwd_str[4..];
-    }
-
-    let emptydir = tempfile::tempdir().unwrap();
-    {
-        let cx = cx.change_dir(emptydir.path());
-        cx.config
-            .expect(["rustup", "override", "set", "nightly", "--path", cwd_str])
-            .await
-            .is_ok();
-    }
-
-    cx.config
-        .expect(["rustup", "override", "list"])
-        .await
-        .extend_redactions([("[CWD]", cwd_str.to_string())])
-        .with_stdout(snapbox::str![[r#"
-[CWD]	nightly             
-
-"#]])
-        .with_stderr(snapbox::str![[""]])
-        .is_ok();
-
-    {
-        let cx = cx.change_dir(emptydir.path());
-        cx.config
-            .expect(["rustup", "override", "unset", "--path", cwd_str])
-            .await
-            .is_ok();
-    }
-
-    cx.config
-        .expect(["rustup", "override", "list"])
-        .await
-        .with_stdout(snapbox::str![[r#"
-no overrides
-
-"#]])
-        .with_stderr(snapbox::str![[""]])
-        .is_ok();
-}
 
 #[tokio::test]
 async fn override_set_unqualified_depends_on_default_host() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
 
     cx.config
-        .expect(["rustup", "override", "set", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "show"])
         .await
@@ -1592,7 +1559,7 @@ async fn override_set_unqualified_depends_on_default_host() {
 active toolchain
 ----------------
 name: nightly-[HOST_TUPLE]
-active because: directory override for '[..]'
+active because: overridden by '[..]'
 ...
 "#]])
         .is_ok();
@@ -1609,7 +1576,7 @@ active because: directory override for '[..]'
 active toolchain
 ----------------
 name: nightly-[CROSS_ARCH_I]
-active because: directory override for '[..]'
+active because: overridden by '[..]'
 ...
 "#]])
         .is_ok();
@@ -1620,9 +1587,10 @@ async fn override_set_qualified_doesnt_depend_on_default_host() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
 
     cx.config
-        .expect(["rustup", "override", "set", for_host!("nightly-{}")])
+        .expect(["rustup", "toolchain", "install", for_host!("nightly-{}")])
         .await
         .is_ok();
+    cx.config.pin(for_host!("nightly-{}"));
     cx.config
         .expect(["rustup", "show"])
         .await
@@ -1631,7 +1599,7 @@ async fn override_set_qualified_doesnt_depend_on_default_host() {
 active toolchain
 ----------------
 name: nightly-[HOST_TUPLE]
-active because: directory override for '[..]'
+active because: overridden by '[..]'
 ...
 "#]])
         .is_ok();
@@ -1648,7 +1616,7 @@ active because: directory override for '[..]'
 active toolchain
 ----------------
 name: nightly-[HOST_TUPLE]
-active because: directory override for '[..]'
+active because: overridden by '[..]'
 ...
 "#]])
         .is_ok();
@@ -1819,14 +1787,15 @@ async fn show_active_toolchain_with_override() {
         .await
         .is_ok();
     cx.config
-        .expect(["rustup", "override", "set", "stable"])
+        .expect(["rustup", "toolchain", "install", "stable"])
         .await
         .is_ok();
+    cx.config.pin("stable");
     cx.config
         .expect(["rustup", "show", "active-toolchain"])
         .await
         .with_stdout(snapbox::str![[r#"
-stable-[HOST_TUPLE] (directory override for '[..]')
+stable-[HOST_TUPLE] (overridden by '[..]')
 
 "#]])
         .is_ok();
@@ -1844,16 +1813,17 @@ async fn show_active_toolchain_with_override_verbose() {
         .await
         .is_ok();
     cx.config
-        .expect(["rustup", "override", "set", "stable"])
+        .expect(["rustup", "toolchain", "install", "stable"])
         .await
         .is_ok();
+    cx.config.pin("stable");
     cx.config
         .expect(["rustup", "show", "active-toolchain", "--verbose"])
         .await
         .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
         .with_stdout(snapbox::str![[r#"
 stable-[HOST_TUPLE]
-active because: directory override for '[..]'
+active because: overridden by '[..]'
 compiler: 1.1.0 (hash-stable-1.1.0)
 path: [RUSTUP_DIR]/toolchains/stable-[HOST_TUPLE]
 
@@ -3390,7 +3360,7 @@ rust-docs-[HOST_TUPLE]
 }
 
 #[tokio::test]
-async fn close_file_override_beats_far_directory_override() {
+async fn close_toolchain_file_beats_far_toolchain_file() {
     let mut cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect(&["rustup", "default", "stable"])
@@ -3406,9 +3376,10 @@ async fn close_file_override_beats_far_directory_override() {
         .is_ok();
 
     cx.config
-        .expect(["rustup", "override", "set", "beta"])
+        .expect(["rustup", "toolchain", "install", "beta"])
         .await
         .is_ok();
+    cx.config.pin("beta");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -3442,7 +3413,7 @@ async fn close_file_override_beats_far_directory_override() {
 async fn override_order() {
     let cx = CliTestContext::new(Scenario::ArchivesV2).await;
     let host = this_host_tuple();
-    // give each override type a different toolchain
+    // Give each selector a different toolchain.
     let default_tc = &format!("beta-2015-01-01-{host}");
     let dir_tc = &format!("beta-2015-01-02-{host}");
     let file_tc = &format!("stable-2015-01-02-{host}");
@@ -3511,22 +3482,23 @@ error: no active toolchain
 "#]])
         .is_ok();
 
-    // dir override > file > default
+    // Replacing the toolchain file selects the new channel.
     cx.config
-        .expect(["rustup", "override", "set", dir_tc])
+        .expect(["rustup", "toolchain", "install", dir_tc])
         .await
         .is_ok();
+    cx.config.pin(dir_tc);
     cx.config
         .expect(["rustup", "show", "active-toolchain"])
         .await
         .extend_redactions([("[DIR_TC]", dir_tc)])
         .with_stdout(snapbox::str![[r#"
-[DIR_TC] (directory override for '[..]')
+[DIR_TC] (overridden by '[..]')
 
 "#]])
         .is_ok();
 
-    // RUSTUP_TOOLCHAIN is not a selector, so the directory override remains.
+    // RUSTUP_TOOLCHAIN is not a selector, so the file pin remains.
     cx.config
         .expect_with_env(
             ["rustup", "show", "active-toolchain"],
@@ -3535,12 +3507,12 @@ error: no active toolchain
         .await
         .extend_redactions([("[DIR_TC]", dir_tc)])
         .with_stdout(snapbox::str![[r#"
-[DIR_TC] (directory override for '[..]')
+[DIR_TC] (overridden by '[..]')
 
 "#]])
         .is_ok();
 
-    // +toolchain > dir override > file > default
+    // +toolchain > file > default
     cx.config
         .expect([
             "rustup",
@@ -3592,22 +3564,6 @@ toolchain-file
 "#]]);
 }
 
-#[tokio::test]
-async fn rustup_toolchain_source_path_override() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    cx.config
-        .expect(["rustup", "override", "set", "nightly"])
-        .await
-        .is_ok();
-    cx.config
-        .expect(["cargo", "--echo-env", "RUSTUP_TOOLCHAIN_SOURCE"])
-        .await
-        .with_stderr(snapbox::str![[r#"
-...
-path-override
-
-"#]]);
-}
 
 #[tokio::test]
 async fn rustup_toolchain_source_toolchain_file() {
@@ -3641,45 +3597,6 @@ default
 "#]]);
 }
 
-#[tokio::test]
-async fn directory_override_doesnt_need_to_exist_unless_it_is_selected() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    cx.config
-        .expect(["rustup", "default", "stable"])
-        .await
-        .is_ok();
-    cx.config
-        .expect(["rustup", "toolchain", "install", "beta"])
-        .await
-        .is_ok();
-    // not installing nightly
-
-    cx.config
-        .expect(["rustup", "override", "set", "beta"])
-        .await
-        .is_ok();
-    cx.config
-        .expect(["rustc", "--version"])
-        .await
-        .with_stdout(snapbox::str![[r#"
-1.2.0 (hash-beta-1.2.0)
-
-"#]])
-        .is_ok();
-
-    let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain.toml");
-    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
-
-    cx.config
-        .expect(["rustc", "--version"])
-        .await
-        .with_stdout(snapbox::str![[r#"
-1.2.0 (hash-beta-1.2.0)
-
-"#]])
-        .is_ok();
-}
 
 #[tokio::test]
 async fn rustup_toolchain_env_does_not_beat_file() {
@@ -4848,64 +4765,6 @@ components = ["cargo", "rust-docs", "rust-std", "rustc"]
     );
 }
 
-#[tokio::test]
-async fn pin_dir_override() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-
-    let mut toml_redactions = snapbox::Redactions::new();
-    toml_redactions
-        .insert("[HOST_TUPLE]", this_host_tuple())
-        .unwrap();
-    let toml_assert = snapbox::Assert::new()
-        .action_env(snapbox::assert::DEFAULT_ACTION_ENV)
-        .redact_with(toml_redactions);
-
-    cx.config
-        .expect(["rustup", "install", "beta"])
-        .await
-        .is_ok();
-
-    cx.config
-        .expect(["rustup", "default", "stable"])
-        .await
-        .is_ok();
-
-    cx.config
-        .expect(["rustup", "override", "set", "beta"])
-        .await
-        .is_ok();
-
-    cx.config
-        .expect(["rustup", "toolchain", "pin"])
-        .await
-        .is_ok();
-
-    let toolchain_file = &cx.config.current_dir().join("rust-toolchain.toml");
-    toml_assert.eq(
-        fs::read_to_string(toolchain_file).unwrap(),
-        snapbox::str![[r#"
-...
-[toolchain]
-channel = "beta"
-
-"#]],
-    );
-
-    fs::remove_file(toolchain_file).unwrap();
-    cx.config
-        .expect(["rustup", "toolchain", "pin", "--qualified"])
-        .await
-        .is_ok();
-    toml_assert.eq(
-        fs::read_to_string(toolchain_file).unwrap(),
-        snapbox::str![[r#"
-...
-[toolchain]
-channel = "beta-[HOST_TUPLE]"
-
-"#]],
-    );
-}
 
 #[tokio::test]
 async fn pin_env_plus_override() {

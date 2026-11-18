@@ -211,50 +211,6 @@ fn rustup_man_cmd_help_flag() {
     test_help("rustup_man_cmd_help_flag", &["man", "--help"]);
 }
 
-#[test]
-fn rustup_override_cmd_help_flag() {
-    test_help("rustup_override_cmd_help_flag", &["override", "--help"]);
-}
-
-#[test]
-fn rustup_override_cmd_add_cmd_help_flag() {
-    test_help(
-        "rustup_override_cmd_add_cmd_help_flag",
-        &["override", "add", "--help"],
-    );
-}
-
-#[test]
-fn rustup_override_cmd_list_cmd_help_flag() {
-    test_help(
-        "rustup_override_cmd_list_cmd_help_flag",
-        &["override", "list", "--help"],
-    );
-}
-
-#[test]
-fn rustup_override_cmd_remove_cmd_help_flag() {
-    test_help(
-        "rustup_override_cmd_remove_cmd_help_flag",
-        &["override", "remove", "--help"],
-    );
-}
-
-#[test]
-fn rustup_override_cmd_set_cmd_help_flag() {
-    test_help(
-        "rustup_override_cmd_set_cmd_help_flag",
-        &["override", "set", "--help"],
-    );
-}
-
-#[test]
-fn rustup_override_cmd_unset_cmd_help_flag() {
-    test_help(
-        "rustup_override_cmd_unset_cmd_help_flag",
-        &["override", "unset", "--help"],
-    );
-}
 
 #[test]
 fn rustup_run_cmd_help_flag() {

@@ -85,10 +85,6 @@ impl<'a> Toolchain<'a> {
             ActiveSource::CommandLine => {
                 "the +toolchain on the command line specifies an uninstalled toolchain".to_string()
             }
-            ActiveSource::OverrideDb(path) => format!(
-                "the directory override for '{}' specifies an uninstalled toolchain",
-                utils::canonicalize_path(path).display(),
-            ),
             ActiveSource::ToolchainFile(path) => format!(
                 "the toolchain file at '{}' specifies an uninstalled toolchain",
                 utils::canonicalize_path(path).display(),
@@ -398,40 +394,31 @@ impl<'a> Toolchain<'a> {
         };
 
         let bin_path = self.path.join("bin").join(&binary);
-        let path = if utils::is_file(&bin_path) {
-            &bin_path
-        } else {
-            let recursion_count = self
-                .cfg
-                .process
-                .var("RUST_RECURSION_COUNT")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-            if recursion_count > env_var::RUST_RECURSION_COUNT_MAX - 1 {
-                let binary_lossy: String = binary.to_string_lossy().into();
-                if matches!(
-                    &self.name,
-                    ToolchainNameOrPath::Named(ToolchainName::Channel(_))
-                ) {
-                    // NOTE: This is a bit of an awkward cast from general `Toolchain` to more
-                    // specialised `ChannelToolchain` which is just a newtype over the former; in
-                    // theory, a `.clone()` is not needed because for `.recursion_error()` we would
-                    // only need a `&ChannelToolchain`, which is safely convertible from
-                    // `&Toolchain`.
-                    let distributable = ChannelToolchain::try_from(self.clone())?;
-                    return Err(distributable.recursion_error(binary_lossy).unwrap_err());
-                } else {
-                    let t = &self.name;
-                    return Err(anyhow!(
-                        "'{binary_lossy}' is not installed for the custom toolchain '{t}'.\nnote: this is a custom toolchain, which cannot use `rustup component add`\n\
-                        help: if you built this toolchain from source, and used `rustup toolchain link`, then you may be able to build the component with `x.py`"
-                    ));
-                }
+        // A missing binary used to be launched by name so PATH could supply it.
+        // That re-entered this proxy, which then had to be told the toolchain
+        // again. Report the miss directly instead.
+        if !utils::is_file(&bin_path) {
+            let binary_lossy: String = binary.to_string_lossy().into();
+            if matches!(
+                &self.name,
+                ToolchainNameOrPath::Named(ToolchainName::Channel(_))
+            ) {
+                // NOTE: This is a bit of an awkward cast from general `Toolchain` to more
+                // specialised `ChannelToolchain` which is just a newtype over the former; in
+                // theory, a `.clone()` is not needed because for `.recursion_error()` we would
+                // only need a `&ChannelToolchain`, which is safely convertible from
+                // `&Toolchain`.
+                let distributable = ChannelToolchain::try_from(self.clone())?;
+                return Err(distributable.recursion_error(binary_lossy).unwrap_err());
+            } else {
+                let t = &self.name;
+                return Err(anyhow!(
+                    "'{binary_lossy}' is not installed for the custom toolchain '{t}'.\nnote: this is a custom toolchain, which cannot use `rustup component add`\n\
+                    help: if you built this toolchain from source, and used `rustup toolchain link`, then you may be able to build the component with `x.py`"
+                ));
             }
-            Path::new(&binary)
-        };
-        let mut cmd = Command::new(path);
+        }
+        let mut cmd = Command::new(&bin_path);
         self.set_env(&mut cmd);
 
         // If we're running cargo and the `CARGO` environment variable is set
@@ -440,11 +427,10 @@ impl<'a> Toolchain<'a> {
         // This works around an issue with old versions of cargo not updating
         // the environment variable itself.
         if Path::new(&binary).file_stem() == Some("cargo".as_ref())
-            && path.is_absolute()
             && let Some(cargo) = self.cfg.process.var_os("CARGO")
             && fs::read_link(&cargo).is_ok_and(|p| p.file_stem() == Some("rustup".as_ref()))
         {
-            cmd.env("CARGO", path);
+            cmd.env("CARGO", &bin_path);
         }
         Ok(cmd)
     }

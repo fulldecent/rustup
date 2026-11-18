@@ -1,4 +1,4 @@
-<svg width="740px" height="596px" xmlns="http://www.w3.org/2000/svg">
+<svg width="740px" height="668px" xmlns="http://www.w3.org/2000/svg">
   <style>
     .fg { fill: #AAAAAA }
     .bg { fill: #000000 }
@@ -74,15 +74,23 @@
 </tspan>
     <tspan x="10px" y="496px"><tspan>    </tspan><tspan class="fg-bright-cyan bold">$ rustup toolchain link latest-stage1 build/x86_64-unknown-linux-gnu/stage1</tspan>
 </tspan>
-    <tspan x="10px" y="514px"><tspan>    </tspan><tspan class="fg-bright-cyan bold">$ rustup override set latest-stage1</tspan>
+    <tspan x="10px" y="514px">
 </tspan>
-    <tspan x="10px" y="532px">
+    <tspan x="10px" y="532px"><tspan>  Then name that toolchain in `rust-toolchain.toml`:</tspan>
 </tspan>
-    <tspan x="10px" y="550px"><tspan>  If you now compile a crate in the current directory, the custom</tspan>
+    <tspan x="10px" y="550px">
 </tspan>
-    <tspan x="10px" y="568px"><tspan>  toolchain 'latest-stage1' will be used.</tspan>
+    <tspan x="10px" y="568px"><tspan>    </tspan><tspan class="fg-bright-cyan bold">[toolchain]</tspan>
 </tspan>
-    <tspan x="10px" y="586px">
+    <tspan x="10px" y="586px"><tspan>    </tspan><tspan class="fg-bright-cyan bold">channel = 'latest-stage1'</tspan>
+</tspan>
+    <tspan x="10px" y="604px">
+</tspan>
+    <tspan x="10px" y="622px"><tspan>  If you now compile a crate in the current directory, the custom</tspan>
+</tspan>
+    <tspan x="10px" y="640px"><tspan>  toolchain 'latest-stage1' will be used.</tspan>
+</tspan>
+    <tspan x="10px" y="658px">
 </tspan>
   </text>
 

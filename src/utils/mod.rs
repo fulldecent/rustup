@@ -414,15 +414,6 @@ pub fn current_exe() -> anyhow::Result<PathBuf> {
     env::current_exe().context(RustupError::LocatingWorkingDir)
 }
 
-pub(crate) fn format_path_for_display(path: &str) -> String {
-    let unc_present = path.find(r"\\?\");
-
-    match unc_present {
-        None => path.to_owned(),
-        Some(_) => path[4..].to_owned(),
-    }
-}
-
 /// Removes `path` if possible, without failing.
 ///
 /// Unlike [`remove_file`], a busy file is left alone instead of retried, since

@@ -267,9 +267,10 @@ async fn remove_override_toolchain_err_handling() {
         .await
         .is_ok();
     cx.config
-        .expect(["rustup", "override", "add", "beta"])
+        .expect(["rustup", "toolchain", "install", "beta"])
         .await
         .is_ok();
+    cx.config.pin("beta");
     cx.config
         .expect(["rustup", "toolchain", "remove", "beta"])
         .await
@@ -340,9 +341,10 @@ error: checksum failed[..]
 async fn install_override_toolchain_from_channel() {
     let cx = CliTestContext::new(Scenario::SimpleV1).await;
     cx.config
-        .expect(["rustup", "override", "add", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -352,9 +354,10 @@ async fn install_override_toolchain_from_channel() {
 "#]])
         .is_ok();
     cx.config
-        .expect(["rustup", "override", "add", "beta"])
+        .expect(["rustup", "toolchain", "install", "beta"])
         .await
         .is_ok();
+    cx.config.pin("beta");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -364,9 +367,10 @@ async fn install_override_toolchain_from_channel() {
 "#]])
         .is_ok();
     cx.config
-        .expect(["rustup", "override", "add", "stable"])
+        .expect(["rustup", "toolchain", "install", "stable"])
         .await
         .is_ok();
+    cx.config.pin("stable");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -381,9 +385,10 @@ async fn install_override_toolchain_from_channel() {
 async fn install_override_toolchain_from_archive() {
     let cx = CliTestContext::new(Scenario::ArchivesV1).await;
     cx.config
-        .expect(["rustup", "override", "add", "nightly-2015-01-01"])
+        .expect(["rustup", "toolchain", "install", "nightly-2015-01-01"])
         .await
         .is_ok();
+    cx.config.pin("nightly-2015-01-01");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -393,9 +398,10 @@ async fn install_override_toolchain_from_archive() {
 "#]])
         .is_ok();
     cx.config
-        .expect(["rustup", "override", "add", "beta-2015-01-01"])
+        .expect(["rustup", "toolchain", "install", "beta-2015-01-01"])
         .await
         .is_ok();
+    cx.config.pin("beta-2015-01-01");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -405,9 +411,10 @@ async fn install_override_toolchain_from_archive() {
 "#]])
         .is_ok();
     cx.config
-        .expect(["rustup", "override", "add", "stable-2015-01-01"])
+        .expect(["rustup", "toolchain", "install", "stable-2015-01-01"])
         .await
         .is_ok();
+    cx.config.pin("stable-2015-01-01");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -422,9 +429,10 @@ async fn install_override_toolchain_from_archive() {
 async fn install_override_toolchain_from_version() {
     let cx = CliTestContext::new(Scenario::SimpleV1).await;
     cx.config
-        .expect(["rustup", "override", "add", "1.1.0"])
+        .expect(["rustup", "toolchain", "install", "1.1.0"])
         .await
         .is_ok();
+    cx.config.pin("1.1.0");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -446,9 +454,10 @@ async fn override_overrides_default() {
 
     let cx = cx.change_dir(tempdir.path());
     cx.config
-        .expect(["rustup", "override", "add", "beta"])
+        .expect(["rustup", "toolchain", "install", "beta"])
         .await
         .is_ok();
+    cx.config.pin("beta");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -472,17 +481,19 @@ async fn multiple_overrides() {
     {
         let cx = cx.change_dir(tempdir1.path());
         cx.config
-            .expect(["rustup", "override", "add", "beta"])
+            .expect(["rustup", "toolchain", "install", "beta"])
             .await
             .is_ok();
+        cx.config.pin("beta");
     }
 
     {
         let cx = cx.change_dir(tempdir2.path());
         cx.config
-            .expect(["rustup", "override", "add", "stable"])
+            .expect(["rustup", "toolchain", "install", "stable"])
             .await
             .is_ok();
+        cx.config.pin("stable");
     }
 
     cx.config
@@ -525,13 +536,15 @@ async fn change_override() {
     let tempdir = tempfile::Builder::new().prefix("rustup").tempdir().unwrap();
     let cx = cx.change_dir(tempdir.path());
     cx.config
-        .expect(["rustup", "override", "add", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
-        .expect(["rustup", "override", "add", "beta"])
+        .expect(["rustup", "toolchain", "install", "beta"])
         .await
         .is_ok();
+    cx.config.pin("beta");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -542,119 +555,6 @@ async fn change_override() {
         .is_ok();
 }
 
-#[tokio::test]
-async fn remove_override_no_default() {
-    let mut cx = CliTestContext::new(Scenario::SimpleV1).await;
-    let tempdir = tempfile::Builder::new().prefix("rustup").tempdir().unwrap();
-    let cx = cx.change_dir(tempdir.path());
-    cx.config
-        .expect(["rustup", "override", "add", "nightly"])
-        .await
-        .is_ok();
-    cx.config
-        .expect(["rustup", "override", "remove"])
-        .await
-        .is_ok();
-    cx.config
-        .expect(["rustc"])
-        .await
-        .with_stderr(snapbox::str![[r#"
-error: rustup could not choose a version of rustc to run[..]
-...
-"#]])
-        .is_err();
-}
-
-#[tokio::test]
-async fn remove_override_with_default() {
-    let mut cx = CliTestContext::new(Scenario::SimpleV1).await;
-    let tempdir = tempfile::Builder::new().prefix("rustup").tempdir().unwrap();
-    let cx = cx.change_dir(tempdir.path());
-    cx.config
-        .expect(["rustup", "default", "nightly"])
-        .await
-        .is_ok();
-    cx.config
-        .expect(["rustup", "override", "add", "beta"])
-        .await
-        .is_ok();
-    cx.config
-        .expect(["rustup", "override", "remove"])
-        .await
-        .is_ok();
-    cx.config
-        .expect(["rustc", "--version"])
-        .await
-        .with_stdout(snapbox::str![[r#"
-1.3.0 (hash-nightly-2)
-
-"#]])
-        .is_ok();
-}
-
-#[tokio::test]
-async fn remove_override_with_multiple_overrides() {
-    let mut cx = CliTestContext::new(Scenario::SimpleV1).await;
-    let tempdir1 = tempfile::Builder::new().prefix("rustup").tempdir().unwrap();
-    let tempdir2 = tempfile::Builder::new().prefix("rustup").tempdir().unwrap();
-    cx.config
-        .expect(["rustup", "default", "nightly"])
-        .await
-        .is_ok();
-
-    {
-        let cx = cx.change_dir(tempdir1.path());
-        cx.config
-            .expect(["rustup", "override", "add", "beta"])
-            .await
-            .is_ok();
-    }
-
-    {
-        let cx = cx.change_dir(tempdir2.path());
-        cx.config
-            .expect(["rustup", "override", "add", "stable"])
-            .await
-            .is_ok();
-    }
-
-    cx.config
-        .expect(["rustc", "--version"])
-        .await
-        .with_stdout(snapbox::str![[r#"
-1.3.0 (hash-nightly-2)
-
-"#]])
-        .is_ok();
-
-    {
-        let cx = cx.change_dir(tempdir1.path());
-        cx.config
-            .expect(["rustup", "override", "remove"])
-            .await
-            .is_ok();
-        cx.config
-            .expect(["rustc", "--version"])
-            .await
-            .with_stdout(snapbox::str![[r#"
-1.3.0 (hash-nightly-2)
-
-"#]])
-            .is_ok();
-    }
-
-    {
-        let cx = cx.change_dir(tempdir2.path());
-        cx.config
-            .expect(["rustc", "--version"])
-            .await
-            .with_stdout(snapbox::str![[r#"
-1.1.0 (hash-stable-1.1.0)
-
-"#]])
-            .is_ok();
-    }
-}
 
 #[tokio::test]
 async fn no_update_on_channel_when_date_has_not_changed() {

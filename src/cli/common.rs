@@ -5,7 +5,6 @@ use std::{
     fmt::Display,
     fs,
     io::{BufRead, Write},
-    path::Path,
     sync::LazyLock,
 };
 
@@ -24,7 +23,7 @@ use crate::{
     install::{InstallMethod, UpdateStatus},
     process::Process,
     toolchain::{Toolchain, ToolchainName, ToolchainNameOrPath},
-    utils::{self, ExitCode},
+    utils::ExitCode,
 };
 
 pub(crate) const WARN_COMPLETE_PROFILE: &str = "\
@@ -392,37 +391,6 @@ pub(crate) async fn list_toolchains(
         Ok(())
     }
 
-    Ok(ExitCode::SUCCESS)
-}
-
-pub(crate) fn list_overrides(cfg: &Cfg<'_>) -> anyhow::Result<ExitCode> {
-    let overrides = cfg.settings_file.with(|s| Ok(s.overrides.clone()))?;
-
-    if overrides.is_empty() {
-        writeln!(cfg.process.stdout().lock(), "no overrides")?;
-    } else {
-        let mut any_not_exist = false;
-        for (k, v) in overrides {
-            let dir_exists = Path::new(&k).is_dir();
-            if !dir_exists {
-                any_not_exist = true;
-            }
-            writeln!(
-                cfg.process.stdout().lock(),
-                "{:<40}\t{:<20}",
-                utils::format_path_for_display(&k)
-                    + if dir_exists { "" } else { " (not a directory)" },
-                v
-            )?
-        }
-        if any_not_exist {
-            writeln!(cfg.process.stdout().lock())?;
-            info!(
-                "you may remove overrides for non-existent directories with
-`rustup override unset --nonexistent`"
-            );
-        }
-    }
     Ok(ExitCode::SUCCESS)
 }
 

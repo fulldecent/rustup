@@ -1,28 +1,22 @@
 # Overrides
 
-`rustup` automatically determines which [toolchain] to use when one of the
-installed commands like `rustc` is executed. There are several ways to control
-and override which toolchain is used:
+`rustup` determines which [toolchain] to use when one of the
+installed commands like `rustc` is executed. There are several ways to
+select that toolchain:
 
 1. A [toolchain override shorthand] used on the command-line, such as `cargo
 +beta`.
-2. A [directory override], set with the `rustup override` command.
-3. The [`rust-toolchain.toml`] file.
-4. The [default toolchain].
+2. The [`rust-toolchain.toml`] file.
+3. The [default toolchain].
 
 The toolchain is chosen in the order listed above, using the first one that is
-specified. There is one exception though: directory overrides and the
-`rust-toolchain.toml` file are also preferred by their proximity to the current
-directory. That is, these two override methods are discovered by walking up
-the directory tree toward the filesystem root, and a `rust-toolchain.toml` file
-that is closer to the current directory will be preferred over a directory
-override that is further away.
+specified. `rust-toolchain.toml` is discovered by walking from the current
+directory toward the filesystem root, and the nearest file wins.
 
 To verify which toolchain is active, you can use `rustup show`.
 
 [toolchain]: concepts/toolchains.md
 [toolchain override shorthand]: #toolchain-override-shorthand
-[directory override]: #directory-overrides
 [`rust-toolchain.toml`]: #the-toolchain-file
 [default toolchain]: #default-toolchain
 
@@ -37,33 +31,6 @@ toolchain will be preferred, as in
 ```console
 cargo +beta test
 ```
-
-## Directory overrides
-
-Directories can be assigned their own Rust toolchain with `rustup override`.
-When a directory has an override then any time `rustc` or `cargo` is run
-inside that directory, or one of its child directories, the override toolchain
-will be invoked.
-
-To use to a specific nightly for a directory:
-
-```console
-rustup override set nightly-2014-12-18
-```
-
-Or a specific stable release:
-
-```console
-rustup override set 1.0.0
-```
-
-To see the active toolchain use `rustup show`. To remove the override and use
-the default toolchain again, `rustup override unset`.
-
-The per-directory overrides are stored in [a configuration file] in `rustup`'s
-home directory.
-
-[a configuration file]: configuration.md
 
 ## The toolchain file
 

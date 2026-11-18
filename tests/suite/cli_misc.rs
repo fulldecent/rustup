@@ -223,18 +223,6 @@ async fn subcommand_required_for_toolchain() {
     assert!(str::from_utf8(&out.stdout).unwrap().contains("Usage"));
 }
 
-// Issue #2425
-// Exit with error and help output when called without subcommand.
-#[tokio::test]
-async fn subcommand_required_for_override() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    let mut cmd = cx.config.cmd("rustup", ["override"]);
-    cx.config.env(&mut cmd);
-    let out = cmd.output().unwrap();
-    assert!(!out.status.success());
-    assert_eq!(out.status.code().unwrap(), 1);
-    assert!(str::from_utf8(&out.stdout).unwrap().contains("Usage"));
-}
 
 // Issue #2425
 // Exit with error and help output when called without subcommand.

@@ -251,6 +251,14 @@ impl Config {
         self.workdir.borrow().clone()
     }
 
+    /// Write `rust-toolchain.toml` in the working directory.
+    ///
+    /// This names a toolchain. It does not install one.
+    pub fn pin(&self, channel: &str) {
+        let path = self.current_dir().join("rust-toolchain.toml");
+        fs::write(path, format!("[toolchain]\nchannel = \"{channel}\"\n")).unwrap();
+    }
+
     pub fn cmd<I, A>(&self, name: &str, args: I) -> Command
     where
         I: IntoIterator<Item = A>,

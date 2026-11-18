@@ -3,7 +3,7 @@ use std::{
     env::consts::EXE_SUFFIX,
     fmt,
     io::{self, Write},
-    path::{self, Path, PathBuf},
+    path::{Path, PathBuf},
     process::ExitStatus,
     str::FromStr,
     sync::Arc,
@@ -33,9 +33,9 @@ use crate::{
         errors::CliError,
         help::{
             check_help, completions_help, default_help, doc_help, install_help,
-            maybe_resolvable_toolchain_arg_help, official_toolchain_arg_help, override_help,
-            override_unset_help, resolvable_local_toolchain_arg_help,
-            resolvable_toolchain_arg_help, run_help, rustup_help, show_active_toolchain_help,
+            maybe_resolvable_toolchain_arg_help, official_toolchain_arg_help,
+            resolvable_local_toolchain_arg_help, resolvable_toolchain_arg_help, run_help,
+            rustup_help, show_active_toolchain_help,
             show_help, toolchain_help, toolchain_install_help, toolchain_link_help, topic_arg_help,
             update_help,
         },
@@ -224,12 +224,6 @@ enum RustupSubcmd {
         subcmd: ComponentSubcmd,
     },
 
-    /// Modify toolchain overrides for directories
-    Override {
-        #[command(subcommand)]
-        subcmd: OverrideSubcmd,
-    },
-
     /// Run a command with an environment configured for a given toolchain
     #[command(after_help = run_help(), trailing_var_arg = true)]
     Run {
@@ -333,7 +327,6 @@ impl RustupSubcmd {
             | Self::Default { .. }
             | Self::DumpTestament
             | Self::Install { .. }
-            | Self::Override { .. }
             | Self::Self_ { .. }
             | Self::Set { .. }
             | Self::Show { .. }
@@ -358,7 +351,6 @@ impl RustupSubcmd {
             | Self::Default { .. }
             | Self::Doc { .. }
             | Self::Install { .. }
-            | Self::Override { .. }
             | Self::Run { .. }
             | Self::Set { .. }
             | Self::Show { .. }
@@ -487,10 +479,6 @@ struct UpdateOpts {
     #[arg(long)]
     force_non_host: bool,
 
-    /// Set the installed toolchain as the override for the current directory
-    #[arg(long)]
-    r#override: bool,
-
     /// Set the installed toolchain as the default toolchain
     #[arg(long)]
     default: bool,
@@ -593,40 +581,6 @@ enum ComponentSubcmd {
 
         #[arg(long)]
         target: Option<String>,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-#[command(
-    after_help = override_help(),
-    arg_required_else_help = true,
-    subcommand_required = true,
-)]
-enum OverrideSubcmd {
-    /// List directory toolchain overrides
-    List,
-
-    /// Set the override toolchain for a directory
-    #[command(alias = "add")]
-    Set {
-        #[arg(help = resolvable_toolchain_arg_help())]
-        toolchain: Override<PartialToolchainName>,
-
-        /// Path to the directory
-        #[arg(long)]
-        path: Option<PathBuf>,
-    },
-
-    /// Remove the override toolchain for a directory
-    #[command(aliases = ["remove", "rm", "delete", "del"], after_help = override_unset_help())]
-    Unset {
-        /// Path to the directory
-        #[arg(long)]
-        path: Option<PathBuf>,
-
-        /// Remove override toolchain for all nonexistent directories
-        #[arg(long)]
-        nonexistent: bool,
     },
 }
 
@@ -830,15 +784,6 @@ pub async fn main(
                 toolchain,
                 target,
             } => component_remove(cfg, component, toolchain, target).await,
-        },
-        RustupSubcmd::Override { subcmd } => match subcmd {
-            OverrideSubcmd::List => handle_epipe(common::list_overrides(cfg)),
-            OverrideSubcmd::Set { toolchain, path } => {
-                override_add(cfg, toolchain, path.as_deref()).await
-            }
-            OverrideSubcmd::Unset { path, nonexistent } => {
-                override_remove(cfg, path.as_deref(), nonexistent)
-            }
         },
         RustupSubcmd::Run {
             toolchain,
@@ -1154,10 +1099,6 @@ async fn update(
                 PackageUpdate::Toolchain(desc.clone()),
                 Ok(status.clone()),
             )?;
-
-            if opts.r#override {
-                cfg.make_override(&cfg.current_dir, &name)?;
-            }
 
             if opts.default
                 || (cfg.get_default()?.is_none() && matches!(status, UpdateStatus::Installed))
@@ -1720,84 +1661,6 @@ fn pin_active_toolchain(qualified: bool, cfg: &Cfg<'_>) -> anyhow::Result<ExitCo
             "# Check the docs at https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file\n\n{toml_buf}",
         ),
     )?;
-    Ok(ExitCode::SUCCESS)
-}
-
-async fn override_add(
-    cfg: &Cfg<'_>,
-    toolchain: Override<PartialToolchainName>,
-    path: Option<&Path>,
-) -> anyhow::Result<ExitCode> {
-    let toolchain_name = toolchain
-        .clone()
-        .resolve(cfg)?
-        .complete(&cfg.default_host_tuple()?)?;
-    match Toolchain::new(cfg, toolchain_name.clone().into()) {
-        Ok(_) => {}
-        Err(e @ RustupError::ToolchainNotInstalled { .. }) => match &toolchain_name {
-            ToolchainName::Custom(_) => Err(e)?,
-            ToolchainName::Channel(desc) => {
-                let options = DistOptions::new(&[], &[], desc, cfg.get_profile()?, false, cfg)?;
-                let status = ChannelToolchain::install(options).await?.status;
-                writeln!(cfg.process.stdout().lock())?;
-                common::show_channel_update(
-                    cfg,
-                    PackageUpdate::Toolchain(desc.clone()),
-                    Ok(status),
-                )?;
-            }
-        },
-        Err(e) => Err(e)?,
-    }
-
-    // Relative to the directory rustup runs in, which `path::absolute` alone
-    // would take from the OS rather than from `cfg`.
-    let path = match path {
-        Some(path) => &path::absolute(cfg.current_dir.join(path))?,
-        None => &cfg.current_dir,
-    };
-    cfg.make_override(path, &toolchain)?;
-    Ok(ExitCode::SUCCESS)
-}
-
-fn override_remove(
-    cfg: &Cfg<'_>,
-    path: Option<&Path>,
-    nonexistent: bool,
-) -> anyhow::Result<ExitCode> {
-    let paths = if nonexistent {
-        let list: Vec<_> = cfg.settings_file.with(|s| {
-            Ok(s.overrides
-                .keys()
-                .filter_map(|k| {
-                    let path = Path::new(k);
-                    (!path.is_dir()).then(|| path.to_owned())
-                })
-                .collect())
-        })?;
-        if list.is_empty() {
-            info!("no nonexistent paths detected");
-        }
-        list
-    } else if let Some(path) = path {
-        vec![path::absolute(cfg.current_dir.join(path))?]
-    } else {
-        vec![cfg.current_dir.clone()]
-    };
-
-    for p in &paths {
-        if cfg.settings_file.with_mut(|s| Ok(s.remove_override(p)))? {
-            info!("override toolchain for '{}' removed", p.display());
-        } else {
-            info!("no override toolchain for '{}'", p.display());
-            if path.is_none() && !nonexistent {
-                info!(
-                    "you may use `--path <path>` option to remove override toolchain \
-                     for a specific path"
-                );
-            }
-        }
-    }
     Ok(ExitCode::SUCCESS)
 }
 
