@@ -66,17 +66,14 @@ After installing rustup with your favorite package manager, there are usually tw
   $ rustup-init
   ```
 
-  This will allow you to perform the initial setup of `rustup` and populate the proxies
-  managed by rustup. Install a toolchain afterwards with `rustup toolchain install`.
+  This copies the `rustup` binary into Cargo's bin directory. Install a
+  toolchain afterwards with `rustup toolchain install`.
 
   > As of 2024/12/23, this is the case for
   > [DNF](https://developer.fedoraproject.org/tech/languages/rust/further-reading.html).
 
-When the installation is completed, please make sure that the rustup proxies
-(usually under `$HOME/.cargo/bin`) are [correctly exposed] via your `$PATH`,
-and you should be able to run `rustup`, `rustc`, `cargo`, etc. normally.
-
-[correctly exposed]: ./already-installed-rust.html#ensure-the-correct-path-configuration
+The installer leaves `PATH` unchanged. Invoke `rustup` by the path it
+printed, then install and name a toolchain.
 
 ### APT
 
@@ -221,6 +218,5 @@ SHA-256 checksums are also available by appending `.sha256` to the link.
 ## Self-compiled installation
 
 To install `rustup` from source, check out the git repository from
-<https://github.com/rust-lang/rustup> and run `cargo run --release`. Note that
-after installation the `rustup` toolchains will supersede any pre-existing
-toolchains by prepending `~/.cargo/bin` to the `PATH` environment variable.
+<https://github.com/rust-lang/rustup> and run `cargo run --release`. The
+installed binary is `rustup`. It does not change `PATH`.

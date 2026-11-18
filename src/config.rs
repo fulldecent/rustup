@@ -409,23 +409,6 @@ impl<'a> Cfg<'a> {
         Ok(cfg)
     }
 
-    pub(crate) fn set_default(
-        &self,
-        toolchain: Option<&PartialToolchainName>,
-    ) -> anyhow::Result<()> {
-        self.settings_file.with_mut(|s| {
-            s.default_toolchain = toolchain.map(|t| t.to_string());
-            Ok(())
-        })?;
-
-        match toolchain {
-            Some(t) => info!("default toolchain set to {t}"),
-            None => info!("default toolchain unset"),
-        }
-
-        Ok(())
-    }
-
     pub(crate) fn set_profile(&mut self, profile: Profile) -> anyhow::Result<()> {
         self.profile_override = None;
         self.settings_file.with_mut(|s| {
@@ -561,13 +544,6 @@ impl<'a> Cfg<'a> {
             }
             MetadataVersion::V12 => unreachable!(),
         }
-    }
-
-    pub(crate) fn find_default(&self) -> anyhow::Result<Option<Toolchain<'_>>> {
-        Ok(self
-            .get_default()?
-            .map(|n| Toolchain::new(self, n.into()))
-            .transpose()?)
     }
 
     pub(crate) async fn toolchain_from_partial(
@@ -854,39 +830,6 @@ impl<'a> Cfg<'a> {
             }
             Err(e) => return Err(e.into()),
         })
-    }
-
-    /// Gets the configured default toolchain name in its resolved form, if any.
-    ///
-    /// This is essentially [`Cfg::get_default_resolvable()`] with an extra resolution step.
-    pub(crate) fn get_default(&self) -> anyhow::Result<Option<ToolchainName>> {
-        let Some(toolchain) = self.get_default_resolvable()? else {
-            return Ok(None);
-        };
-        Ok(Some(toolchain.complete(&self.default_host_tuple()?)?))
-    }
-
-    /// Gets the configured default toolchain name in its unresolved form, if any.
-    ///
-    /// # Errors
-    ///
-    /// This function returns an error if:
-    /// - The configuration file is invalid.
-    /// - The configuration file contains an illegal default toolchain name.
-    pub(crate) fn get_default_resolvable(&self) -> anyhow::Result<Option<PartialToolchainName>> {
-        let user_opt = self.settings_file.with(|s| Ok(s.default_toolchain.clone()));
-        let toolchain_maybe_str = if let Some(fallback_settings) = &self.fallback_settings {
-            match user_opt {
-                Err(_) | Ok(None) => Ok(fallback_settings.default_toolchain.clone()),
-                o => o,
-            }
-        } else {
-            user_opt
-        }?;
-        let Some(toolchain) = &toolchain_maybe_str else {
-            return Ok(None);
-        };
-        Ok(Some(PartialToolchainName::from_str(toolchain)?))
     }
 
     /// Lists all the installed toolchains.

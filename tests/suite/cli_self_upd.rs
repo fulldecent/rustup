@@ -26,7 +26,7 @@ use rustup::{
         CROSS_ARCH1, CliTestContext, Scenario, SelfUpdateTestContext, calc_hash,
         output_release_file, this_host_tuple,
     },
-    utils::{self, raw},
+    utils::raw,
 };
 #[cfg(windows)]
 use windows_registry::{CURRENT_USER, Value};
@@ -57,9 +57,8 @@ async fn setup_installed() -> CliTestContext {
     cx
 }
 
-/// This is the primary smoke test testing the full end to end behavior of the
-/// installation code path: everything that is output, the proxy installation,
-/// status of the proxies.
+/// The installer copies the rustup binary and records profile and host.
+/// It does not download a toolchain or create proxy names.
 #[tokio::test]
 async fn install_bins_to_cargo_home() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
@@ -69,15 +68,13 @@ async fn install_bins_to_cargo_home() {
         .await
         .with_stdout(snapbox::str![[r#"
 ...
-  stable-[HOST_TUPLE] installed - 1.1.0 (hash-stable-1.1.0)
+rustup is installed
 ...
 "#]])
         .with_stderr(snapbox::str![[r#"
 ...
-info: syncing channel updates for stable-[HOST_TUPLE]
-info: latest update on 2015-01-02 for version 1.1.0 (hash-stable-1.1.0)
-info: downloading 4 components
-info: default toolchain set to stable
+info: profile set to default
+info: default host tuple is [HOST_TUPLE]
 
 "#]])
         .is_ok();
@@ -95,48 +92,11 @@ info: default toolchain set to stable
         assert!(is_exe(path));
     }
 
+    let rustup = cx.config.cargodir.join(format!("bin/rustup{EXE_SUFFIX}"));
+    check(&rustup);
     for tool in TOOLS.iter().chain(DUP_TOOLS.iter()) {
-        let path = &cx.config.cargodir.join(format!("bin/{tool}{EXE_SUFFIX}"));
-        check(path);
-    }
-}
-
-/// Ensure that proxies are relative symlinks.
-#[tokio::test]
-async fn proxies_are_relative_symlinks() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-
-    cx.config
-        .expect(["rustup-init", "-y"])
-        .await
-        .with_stdout(snapbox::str![[r#"
-...
-  stable-[HOST_TUPLE] installed - 1.1.0 (hash-stable-1.1.0)
-...
-"#]])
-        .with_stderr(snapbox::str![[r#"
-...
-info: syncing channel updates for stable-[HOST_TUPLE]
-info: latest update on 2015-01-02 for version 1.1.0 (hash-stable-1.1.0)
-info: downloading 4 components
-info: default toolchain set to stable
-...
-"#]])
-        .is_ok();
-
-    let rustup = format!("rustup{EXE_SUFFIX}");
-    for tool in TOOLS.iter().chain(DUP_TOOLS.iter()) {
-        let path = &cx.config.cargodir.join(format!("bin/{tool}{EXE_SUFFIX}"));
-        // If it's a normal file then it means that hardlinks are being used
-        // for proxies instead of symlinks.
-        if fs::symlink_metadata(path).unwrap().is_file() {
-            continue;
-        }
-        let is_rustup_symlink = match fs::read_link(path) {
-            Ok(p) => p.as_os_str() == rustup.as_str(),
-            _ => false,
-        };
-        assert!(is_rustup_symlink, "{}", path.display());
+        let path = cx.config.cargodir.join(format!("bin/{tool}{EXE_SUFFIX}"));
+        assert!(!path.exists(), "{}", path.display());
     }
 }
 
@@ -243,8 +203,8 @@ async fn uninstall_works_if_some_bins_dont_exist() {
         .cargodir
         .join(format!("bin/rust-gdbgui{EXE_SUFFIX}"));
 
-    fs::remove_file(&rustc).unwrap();
-    fs::remove_file(&cargo).unwrap();
+    // A name that is not the rustup binary stays. Proxy names are absent.
+    fs::write(&rustc, "not rustup").unwrap();
 
     cx.config
         .expect(["rustup", "self", "uninstall", "-y"])
@@ -252,7 +212,7 @@ async fn uninstall_works_if_some_bins_dont_exist() {
         .is_ok();
 
     assert!(!rustup.exists());
-    assert!(!rustc.exists());
+    assert!(rustc.exists());
     assert!(!rustdoc.exists());
     assert!(!cargo.exists());
     assert!(!rust_lldb.exists());
@@ -1116,11 +1076,6 @@ async fn reinstall_exact() {
             "--no-modify-path",
         ])
         .await
-        .with_stderr(snapbox::str![[r#"
-...
-info: updating existing rustup installation - leaving toolchains alone
-...
-"#]])
         .is_ok();
 }
 
@@ -1135,17 +1090,21 @@ async fn reinstall_specifying_toolchain() {
             "--no-modify-path",
         ])
         .await
-        .with_stdout(snapbox::str![[r#"
-...
-  stable-[HOST_TUPLE] unchanged - 1.1.0 (hash-stable-1.1.0)
-...
-"#]])
+        .is_ok();
+    cx.config
+        .expect(["rustup", "toolchain", "list"])
+        .await
+        .with_stdout(snapbox::str![""])
         .is_ok();
 }
 
 #[tokio::test]
 async fn reinstall_specifying_component() {
     let cx = setup_installed().await;
+    cx.config
+        .expect(["rustup", "toolchain", "install", "stable"])
+        .await
+        .is_ok();
     cx.config.pin("stable");
     cx.config
         .expect(["rustup", "component", "add", "rls"])
@@ -1159,9 +1118,13 @@ async fn reinstall_specifying_component() {
             "--no-modify-path",
         ])
         .await
+        .is_ok();
+    cx.config
+        .expect(["rustup", "component", "list", "--installed"])
+        .await
         .with_stdout(snapbox::str![[r#"
 ...
-  stable-[HOST_TUPLE] unchanged - 1.1.0 (hash-stable-1.1.0)
+rls-[HOST_TUPLE]
 ...
 "#]])
         .is_ok();
@@ -1178,11 +1141,11 @@ async fn reinstall_specifying_different_toolchain() {
             "--no-modify-path",
         ])
         .await
-        .with_stderr(snapbox::str![[r#"
-...
-info: default toolchain set to nightly
-...
-"#]])
+        .is_ok();
+    cx.config
+        .expect(["rustup", "toolchain", "list"])
+        .await
+        .with_stdout(snapbox::str![""])
         .is_ok();
 }
 
@@ -1202,11 +1165,12 @@ async fn install_sets_up_stable_unless_a_different_default_is_requested() {
     cx.config
         .expect(["rustup", "run", "nightly", "rustc", "--version"])
         .await
-        .with_stdout(snapbox::str![[r#"
-1.3.0 (hash-nightly-2)
+        .with_stderr(snapbox::str![[r#"
+error: toolchain 'nightly-[HOST_TUPLE]' is not installed
+help: run `rustup toolchain install nightly-[HOST_TUPLE]` to install it
 
 "#]])
-        .is_ok();
+        .is_err();
 }
 
 #[tokio::test]
@@ -1289,6 +1253,10 @@ async fn rls_proxy_set_up_after_install() {
             .expect(["rustup-init", "-y", "--no-modify-path"])
             .await
             .is_ok();
+        cx.config
+            .expect(["rustup", "toolchain", "install", "stable"])
+            .await
+            .is_ok();
         cx.config.pin("stable");
     }
 
@@ -1316,9 +1284,9 @@ async fn rls_proxy_set_up_after_update() {
         .expect(["rustup-init", "-y", "--no-modify-path"])
         .await
         .is_ok();
-    fs::remove_file(&rls_path).unwrap();
+    assert!(!rls_path.exists());
     cx.config.expect(["rustup", "self", "update"]).await.is_ok();
-    assert!(rls_path.exists());
+    assert!(!rls_path.exists());
 }
 
 #[tokio::test]
@@ -1331,42 +1299,15 @@ async fn update_does_not_overwrite_rustfmt() {
     let version = env!("CARGO_PKG_VERSION");
     output_release_file(cx.path(), "1", version);
 
-    // Since we just did a fresh install rustfmt will exist. Let's emulate
-    // it not existing in this test though by removing it just after our
-    // installation.
+    // A rustfmt installed beside rustup is left alone. Self-update replaces
+    // the rustup binary and does not create or replace proxy names.
     let rustfmt_path = cx.config.cargodir.join(format!("bin/rustfmt{EXE_SUFFIX}"));
-    assert!(rustfmt_path.exists());
-    fs::remove_file(&rustfmt_path).unwrap();
-    raw::write_file(&rustfmt_path, "").unwrap();
-    assert_eq!(utils::file_size(&rustfmt_path).unwrap(), 0);
-
-    // Ok, now a self-update should complain about `rustfmt` not looking
-    // like rustup and the user should take some action.
-    cx.config
-        .expect(["rustup", "self", "update"])
-        .await
-        .with_stderr(snapbox::str![[r#"
-info: checking for self-update (current version: [CURRENT_VERSION])
-warn: tool `rustfmt` is already installed, remove it from `[..]`, then run `rustup update` to have rustup manage this tool.
-
-"#]])
-        .is_ok();
-    assert!(rustfmt_path.exists());
-    assert_eq!(utils::file_size(&rustfmt_path).unwrap(), 0);
-
-    // Now simulate us removing the rustfmt executable and rerunning a self
-    // update, this should install the rustup shim. Note that we don't run
-    // `rustup` here but rather the rustup we've actually installed, this'll
-    // help reproduce bugs related to having that file being opened by the
-    // current process.
-    fs::remove_file(&rustfmt_path).unwrap();
-    let installed_rustup = cx.config.cargodir.join("bin/rustup");
-    cx.config
-        .expect([installed_rustup.to_str().unwrap(), "self", "update"])
-        .await
-        .is_ok();
-    assert!(rustfmt_path.exists());
-    assert!(utils::file_size(&rustfmt_path).unwrap() > 0);
+    raw::write_file(&rustfmt_path, "custom rustfmt").unwrap();
+    cx.config.expect(["rustup", "self", "update"]).await.is_ok();
+    assert_eq!(
+        fs::read_to_string(&rustfmt_path).unwrap(),
+        "custom rustfmt"
+    );
 }
 
 #[tokio::test]
@@ -1383,7 +1324,7 @@ async fn update_installs_clippy_cargo_and() {
         .config
         .cargodir
         .join(format!("bin/cargo-clippy{EXE_SUFFIX}"));
-    assert!(cargo_clippy_path.exists());
+    assert!(!cargo_clippy_path.exists());
 }
 
 #[tokio::test]
@@ -1403,23 +1344,15 @@ async fn install_with_components_and_targets() {
         ])
         .await
         .is_ok();
-    cx.config.pin("nightly");
     cx.config
-        .expect(["rustup", "target", "list"])
+        .expect(["rustup", "toolchain", "list"])
         .await
-        .with_stdout(snapbox::str![[r#"
-...
-[CROSS_ARCH_I] (installed)
-...
-"#]])
-        .is_ok();
-    cx.config
-        .expect(["rustup", "component", "list"])
-        .await
-        .with_stdout(snapbox::str![[r#"
-...
-rls-[HOST_TUPLE] (installed)
-...
+        .with_stdout(snapbox::str![""])
+        .with_stderr(snapbox::str![[r#"
+info: no installed toolchains
+warn: no toolchain installed
+help: run 'rustup toolchain install stable' to download the latest stable release of Rust, then name it in rust-toolchain.toml
+
 "#]])
         .is_ok();
 }

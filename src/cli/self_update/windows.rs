@@ -18,7 +18,6 @@ use std::{
 
 use anyhow::{Context, anyhow};
 use cc::windows_registry::{find_tool, find_vs_version};
-use itertools::Itertools;
 use tracing::{info, warn};
 #[cfg(any(test, feature = "test"))]
 use windows_registry::Value;
@@ -26,8 +25,7 @@ use windows_registry::{CURRENT_USER, HSTRING, Key};
 use windows_result::WIN32_ERROR;
 use windows_sys::Win32::{
     Foundation::{
-        DuplicateHandle, ERROR_FILE_NOT_FOUND, ERROR_INVALID_DATA, INVALID_HANDLE_VALUE, LPARAM,
-        WAIT_OBJECT_0, WPARAM,
+        DuplicateHandle, ERROR_FILE_NOT_FOUND, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
     },
     Storage::FileSystem::{
         FILE_FLAG_DELETE_ON_CLOSE, FILE_SHARE_DELETE, FILE_SHARE_READ, SYNCHRONIZE,
@@ -40,9 +38,6 @@ use windows_sys::Win32::{
         Threading::{
             GetCurrentProcess, GetCurrentProcessId, INFINITE, OpenProcess, WaitForSingleObject,
         },
-    },
-    UI::WindowsAndMessaging::{
-        HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutA, WM_SETTINGCHANGE,
     },
 };
 
@@ -504,116 +499,6 @@ fn wait_for_parent_legacy() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn add_to_path(process: &Process) -> anyhow::Result<()> {
-    let new_path = _with_path_cargo_home_bin(_add_to_path, process)?;
-    _apply_new_path(new_path, process)
-}
-
-fn _apply_new_path(new_path: Option<HSTRING>, process: &Process) -> anyhow::Result<()> {
-    let Some(new_path) = new_path else {
-        return Ok(()); // No need to set the path
-    };
-
-    let environment = process.registry_environment_key()?;
-
-    if new_path.is_empty() {
-        environment.remove_value("PATH")?;
-    } else {
-        environment.set_expand_hstring("PATH", &new_path)?;
-    }
-
-    // Tell other processes to update their environment
-    #[allow(clippy::unnecessary_cast)]
-    unsafe {
-        SendMessageTimeoutA(
-            HWND_BROADCAST,
-            WM_SETTINGCHANGE,
-            0 as WPARAM,
-            c"Environment".as_ptr() as LPARAM,
-            SMTO_ABORTIFHUNG,
-            5000,
-            ptr::null_mut(),
-        );
-    }
-
-    Ok(())
-}
-
-// Get the windows PATH variable out of the registry as a String. If
-// this returns None then the PATH variable is not a string and we
-// should not mess with it.
-fn get_windows_path_var(process: &Process) -> anyhow::Result<Option<HSTRING>> {
-    let environment = process
-        .registry_environment_key()
-        .context("Failed opening Environment key")?;
-
-    let reg_value = environment.get_hstring("PATH");
-    match reg_value {
-        Ok(val) => Ok(Some(val)),
-        Err(e) if e.code() == WIN32_ERROR(ERROR_INVALID_DATA).to_hresult() => {
-            warn!(
-                "the registry key HKEY_CURRENT_USER\\Environment\\PATH is not a string. \
-                   Not modifying the PATH variable"
-            );
-            Ok(None)
-        }
-        Err(e) if e.code() == WIN32_ERROR(ERROR_FILE_NOT_FOUND).to_hresult() => {
-            Ok(Some(HSTRING::new()))
-        }
-        Err(e) => Err(e).context(CliError::WindowsUninstallMadness),
-    }
-}
-
-// Returns None if the existing old_path does not need changing, otherwise
-// prepends the path_str to old_path, handling empty old_path appropriately.
-fn _add_to_path(old_path: HSTRING, path_str: HSTRING) -> Option<HSTRING> {
-    if old_path.is_empty() {
-        Some(path_str)
-    } else if old_path
-        .split(|&c| c == PATH_SEPARATOR)
-        .any(|path| *path == *path_str)
-    {
-        None
-    } else {
-        let mut new_path = path_str.to_os_string();
-        new_path.push(";");
-        new_path.push(old_path.to_os_string());
-        Some(HSTRING::from(new_path))
-    }
-}
-
-// Returns the updated PATH string with empty entries and all entries equal to
-// path_str removed, or None if the contents are unchanged.
-fn _remove_from_path(old_path: HSTRING, path_str: HSTRING) -> Option<HSTRING> {
-    let new_path = Itertools::intersperse(
-        old_path
-            .split(|&c| c == PATH_SEPARATOR)
-            .filter(|path| !path.is_empty() && **path != *path_str),
-        &[PATH_SEPARATOR],
-    )
-    .flatten()
-    .copied()
-    .collect::<Vec<_>>();
-    (new_path != *old_path).then(|| HSTRING::from_wide(&new_path))
-}
-
-const PATH_SEPARATOR: u16 = b';' as u16;
-
-fn _with_path_cargo_home_bin<F>(f: F, process: &Process) -> anyhow::Result<Option<HSTRING>>
-where
-    F: FnOnce(HSTRING, HSTRING) -> Option<HSTRING>,
-{
-    let windows_path = get_windows_path_var(process)?;
-    let mut path_str = process.cargo_home()?;
-    path_str.push("bin");
-    Ok(windows_path.and_then(|old_path| f(old_path, HSTRING::from(path_str.as_path()))))
-}
-
-pub(crate) fn remove_from_path(process: &Process) -> anyhow::Result<()> {
-    let new_path = _with_path_cargo_home_bin(_remove_from_path, process)?;
-    _apply_new_path(new_path, process)
-}
-
 const RUSTUP_UNINSTALL_ENTRY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Rustup";
 
 impl Process {
@@ -847,9 +732,7 @@ impl RegistryValueId {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, os::windows::ffi::OsStringExt};
-
-    use windows_registry::Type;
+    use std::collections::HashMap;
 
     use super::*;
     use crate::{process::TestProcess, test::test_id};
@@ -862,14 +745,6 @@ mod tests {
         .into_iter()
         .collect();
         TestProcess::with_vars(vars)
-    }
-
-    fn clear_path(environment: &Key) {
-        match environment.remove_value("PATH") {
-            Ok(()) => {}
-            Err(e) if e.code() == WIN32_ERROR(ERROR_FILE_NOT_FOUND).to_hresult() => {}
-            Err(e) => panic!("failed to clear PATH: {e}"),
-        }
     }
 
     #[test]
@@ -932,185 +807,5 @@ mod tests {
         remove_uninstall_registry_entry(&tp.process).unwrap();
     }
 
-    #[test]
-    fn windows_install_does_not_add_path_twice() {
-        assert_eq!(
-            None,
-            _add_to_path(
-                HSTRING::from(r"c:\users\example\.cargo\bin;foo"),
-                HSTRING::from(r"c:\users\example\.cargo\bin")
-            )
-        );
-    }
 
-    #[test]
-    fn windows_path_does_not_match_similar_entries() {
-        let target = HSTRING::from(r"C:\tools\bin");
-        let similar_paths = HSTRING::from(r"C:\first;C:\tools\bin-extra;XC:\tools\bin;C:\last");
-        assert_eq!(
-            Some(HSTRING::from(
-                r"C:\tools\bin;C:\first;C:\tools\bin-extra;XC:\tools\bin;C:\last"
-            )),
-            _add_to_path(similar_paths.clone(), target.clone())
-        );
-        assert_eq!(
-            None,
-            _remove_from_path(similar_paths.clone(), target.clone())
-        );
-
-        let old_path =
-            HSTRING::from(r"C:\first;C:\tools\bin-extra;XC:\tools\bin;C:\tools\bin;C:\last");
-        assert_eq!(None, _add_to_path(old_path.clone(), target.clone()));
-        assert_eq!(Some(similar_paths), _remove_from_path(old_path, target));
-    }
-
-    #[test]
-    fn windows_uninstall_removes_empty_path_entries() {
-        for (old_path, expected) in [
-            ("foo;", Some("")),
-            (";foo;bar;", Some("bar")),
-            ("first;;foo;;last", Some("first;last")),
-            (";bar;", Some("bar")),
-            ("", None),
-        ] {
-            assert_eq!(
-                expected.map(HSTRING::from),
-                _remove_from_path(HSTRING::from(old_path), HSTRING::from("foo")),
-                "PATH: {old_path}"
-            );
-        }
-    }
-
-    #[test]
-    fn windows_handle_non_unicode_path() {
-        let initial_path = vec![
-            0xD800, // leading surrogate
-            0x0101, // bogus trailing surrogate
-            0x0000, // null
-        ];
-        let cargo_home = r"c:\users\example\.cargo\bin";
-        let mut final_path = OsString::from(cargo_home);
-        final_path.push(";");
-        final_path.push(OsString::from_wide(&initial_path));
-
-        assert_eq!(
-            final_path,
-            _add_to_path(HSTRING::from_wide(&initial_path), HSTRING::from(cargo_home)).unwrap()
-        );
-        assert_eq!(
-            HSTRING::from_wide(&initial_path),
-            _remove_from_path(HSTRING::from(final_path), HSTRING::from(cargo_home)).unwrap()
-        );
-    }
-
-    #[test]
-    fn windows_path_regkey_type() {
-        // per issue #261, setting PATH should use REG_EXPAND_SZ.
-        let test_id = test_id();
-        let tp = test_process(&test_id);
-        let environment = tp.process.registry_environment_key().unwrap();
-        clear_path(&environment);
-
-        {
-            // Can't compare the Results as Eq isn't derived; thanks error-chain.
-            #![allow(clippy::unit_cmp)]
-            assert_eq!(
-                (),
-                _apply_new_path(Some(HSTRING::from("foo")), &tp.process).unwrap()
-            );
-        }
-        let environment = tp.process.registry_environment_key().unwrap();
-        let path = environment.get_value("PATH").unwrap();
-        let path_hstring = environment.get_hstring("PATH").unwrap();
-        assert_eq!(path.ty(), Type::ExpandString);
-        assert_eq!(HSTRING::from("foo"), path_hstring);
-    }
-
-    #[test]
-    fn windows_path_delete_key_when_empty() {
-        // during uninstall the PATH key may end up empty; if so we should
-        // delete it.
-        let test_id = test_id();
-        let tp = test_process(&test_id);
-        let environment = tp.process.registry_environment_key().unwrap();
-        environment
-            .set_expand_hstring("PATH", &HSTRING::from("foo"))
-            .unwrap();
-
-        {
-            // Can't compare the Results as Eq isn't derived; thanks error-chain.
-            #![allow(clippy::unit_cmp)]
-            assert_eq!(
-                (),
-                _apply_new_path(Some(HSTRING::new()), &tp.process).unwrap()
-            );
-        }
-        let reg_value = environment.get_value("PATH");
-        match reg_value {
-            Ok(_) => panic!("key not deleted"),
-            Err(e) if e.code() == WIN32_ERROR(ERROR_FILE_NOT_FOUND).to_hresult() => {}
-            Err(e) => panic!("error {e}"),
-        }
-    }
-
-    #[test]
-    fn windows_doesnt_mess_with_a_non_string_path() {
-        let test_id = test_id();
-        // This writes an error, so we want a sink for it.
-        let tp = test_process(&test_id);
-
-        let environment = tp.process.registry_environment_key().unwrap();
-        environment
-            .set_bytes("PATH", Type::Bytes, &[0x12, 0x34])
-            .unwrap();
-        // Ok(None) signals no change to the PATH setting layer
-        assert_eq!(
-            None,
-            _with_path_cargo_home_bin(|_, _| panic!("called"), &tp.process).unwrap()
-        );
-
-        assert_eq!(
-            r"warn: the registry key HKEY_CURRENT_USER\Environment\PATH is not a string. Not modifying the PATH variable
-",
-            String::from_utf8(tp.stderr()).unwrap()
-        );
-    }
-
-    #[test]
-    fn windows_treat_missing_path_as_empty() {
-        // during install the PATH key may be missing; treat it as empty
-        let test_id = test_id();
-        let tp = test_process(&test_id);
-        let environment = tp.process.registry_environment_key().unwrap();
-        clear_path(&environment);
-
-        assert_eq!(
-            Some(HSTRING::new()),
-            get_windows_path_var(&tp.process).unwrap()
-        );
-    }
-
-    #[test]
-    fn windows_uninstall_removes_semicolon_from_path_prefix() {
-        assert_eq!(
-            HSTRING::from("foo"),
-            _remove_from_path(
-                HSTRING::from(r"c:\users\example\.cargo\bin;foo"),
-                HSTRING::from(r"c:\users\example\.cargo\bin"),
-            )
-            .unwrap()
-        )
-    }
-
-    #[test]
-    fn windows_uninstall_removes_semicolon_from_path_suffix() {
-        assert_eq!(
-            HSTRING::from("foo"),
-            _remove_from_path(
-                HSTRING::from(r"foo;c:\users\example\.cargo\bin"),
-                HSTRING::from(r"c:\users\example\.cargo\bin"),
-            )
-            .unwrap()
-        )
-    }
 }

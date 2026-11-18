@@ -72,63 +72,23 @@ async fn smoke_case_install_no_modify_path() {
     )
     .with_stdout(snapbox::str![[r#"
 ...
-This path needs to be in your PATH environment variable,
-but will not be added automatically.
-
-You can uninstall at any time with rustup self uninstall and
-these changes will be reverted.
-
-Current installation options:
-
-
+This copies the rustup binary into place and records install metadata.
+...
     default host tuple: [HOST_TUPLE]
-     default toolchain: stable (default)
                profile: default
-  modify PATH variable: no
-
+...
 1) Proceed with standard installation (default - just press enter)
 2) Customize installation
 3) Cancel installation
 >
 
-  stable-[HOST_TUPLE] installed - 1.1.0 (hash-stable-1.1.0)
-
-
-Rust is installed now. Great!
+rustup is installed
 ...
 "#]])
-    .with_stdout(cfg_select! {
-        windows => snapbox::str![[r#"
-...
-Rust is installed now. Great!
-
-To get started you need Cargo's bin directory (%USERPROFILE%/.cargo/bin) in[..]
-your PATH
-environment variable. This has not been done automatically.
-
-Press the Enter key to continue.
-
-"#]],
-        _ => snapbox::str![[r#"
-...
-Rust is installed now. Great!
-
-To get started you need Cargo's bin directory ($HOME/.cargo/bin) in your PATH
-environment variable. This has not been done automatically.
-
-To configure your current shell, you need to source the
-corresponding env file under $HOME/.cargo.
-
-Consider running the right command for your shell (note the leading DOT):
-
-  . "$HOME/.cargo/env" # For sh/ash/dash/pdksh
-...
-"#]],
-    })
     .is_ok();
     if cfg!(unix) {
         assert!(!cx.config.homedir.join(".profile").exists());
-        assert!(cx.config.cargodir.join("env").exists());
+        assert!(!cx.config.cargodir.join("env").exists());
     }
 }
 
@@ -147,36 +107,15 @@ async fn smoke_case_install_with_path_install() {
         ],
     )
     .is_ok()
-    .without_stdout("This path needs to be in your PATH environment variable")
-    .with_stdout(cfg_select! {
-        windows => snapbox::str![[r#"
+    .with_stdout(snapbox::str![[r#"
 ...
-Rust is installed now. Great!
-
-To get started you may need to restart your current shell.
-This would reload your PATH environment variable to include
-Cargo's bin directory (%USERPROFILE%/.cargo/bin).
-
-Press the Enter key to continue.
-
-"#]],
-        _ => snapbox::str![[r#"
+rustup is installed
 ...
-Rust is installed now. Great!
-
-To get started you may need to restart your current shell.
-This would reload your PATH environment variable to include
-Cargo's bin directory ($HOME/.cargo/bin).
-
-To configure your current shell, you need to source the
-corresponding env file under $HOME/.cargo.
-
-Consider running the right command for your shell (note the leading DOT):
-
-  . "$HOME/.cargo/env" # For sh/ash/dash/pdksh
-...
-"#]],
-    });
+"#]]);
+    if cfg!(unix) {
+        assert!(!cx.config.homedir.join(".profile").exists());
+        assert!(!cx.config.cargodir.join("env").exists());
+    }
 }
 
 #[tokio::test]
@@ -200,8 +139,7 @@ async fn blank_lines_around_stderr_log_output_update() {
 3) Cancel installation
 >
 
-
-Rust is installed now. Great!
+rustup is installed
 ...
 "#]]);
 }
@@ -216,37 +154,6 @@ Default host tuple? [[HOST_TUPLE]]
 ...
 "#]
     ]);
-}
-
-#[tokio::test]
-async fn installer_shows_default_toolchain_as_stable() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    run_input(&cx.config, &["rustup-init", "--no-modify-path"], "2\n\n").with_stdout(
-        snapbox::str![[r#"
-...
-Default toolchain? (stable/beta/nightly/none) [stable]
-...
-"#]],
-    );
-}
-
-#[tokio::test]
-async fn installer_shows_default_toolchain_when_set_in_args() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    run_input(
-        &cx.config,
-        &[
-            "rustup-init",
-            "--no-modify-path",
-            "--default-toolchain=nightly",
-        ],
-        "2\n\n",
-    )
-    .with_stdout(snapbox::str![[r#"
-...
-Default toolchain? (stable/beta/nightly/none) [nightly]
-...
-"#]]);
 }
 
 #[tokio::test]
@@ -272,31 +179,6 @@ async fn installer_shows_default_profile_when_set_in_args() {
     .with_stdout(snapbox::str![[r#"
 ...
 Profile (which tools and data to install)? (minimal/default/complete) [minimal]
-...
-"#]]);
-}
-
-#[tokio::test]
-async fn installer_shows_default_for_modify_path() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    run_input(&cx.config, &["rustup-init"], "2\n\n\n\n").with_stdout(snapbox::str![[r#"
-...
-Modify PATH variable? (Y/n)
-...
-"#]]);
-}
-
-#[tokio::test]
-async fn installer_shows_default_for_modify_path_when_set_with_args() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    run_input(
-        &cx.config,
-        &["rustup-init", "--no-modify-path"],
-        "2\n\n\n\n",
-    )
-    .with_stdout(snapbox::str![[r#"
-...
-Modify PATH variable? (y/N)
 ...
 "#]]);
 }
@@ -389,11 +271,10 @@ async fn with_non_default_toolchain_still_prompts() {
         .await
         .with_stdout(snapbox::str![[r#"
 ...
-installed toolchains
---------------------
-nightly-[HOST_TUPLE]
+no active toolchain
 ...
 "#]])
+        .without_stdout("nightly")
         .is_ok();
 }
 
@@ -416,11 +297,10 @@ async fn with_non_release_channel_non_default_toolchain() {
         .await
         .with_stdout(snapbox::str![[r#"
 ...
-installed toolchains
---------------------
-nightly-2015-01-02-[HOST_TUPLE]
+no active toolchain
 ...
 "#]])
+        .without_stdout("nightly")
         .is_ok();
 }
 
@@ -430,7 +310,7 @@ async fn set_nightly_toolchain() {
     run_input(
         &cx.config,
         &["rustup-init", "--no-modify-path"],
-        "2\n\nnightly\n\n\n\n\n",
+        "2\n\n\n\n",
     )
     .is_ok();
 
@@ -439,9 +319,7 @@ async fn set_nightly_toolchain() {
         .await
         .with_stdout(snapbox::str![[r#"
 ...
-installed toolchains
---------------------
-nightly-[HOST_TUPLE]
+no active toolchain
 ...
 "#]])
         .is_ok();
@@ -453,7 +331,7 @@ async fn set_no_modify_path() {
     run_input(
         &cx.config,
         &["rustup-init", "--no-modify-path"],
-        "2\n\n\n\nno\n\n\n",
+        "\n\n",
     )
     .is_ok();
 
@@ -468,7 +346,7 @@ async fn set_nightly_toolchain_and_unset() {
     run_input(
         &cx.config,
         &["rustup-init", "--no-modify-path"],
-        "2\n\nnightly\n\n\n2\n\nbeta\n\n\n\n\n",
+        "2\n\n\n\n",
     )
     .is_ok();
 
@@ -477,9 +355,7 @@ async fn set_nightly_toolchain_and_unset() {
         .await
         .with_stdout(snapbox::str![[r#"
 ...
-installed toolchains
---------------------
-beta-[HOST_TUPLE]
+no active toolchain
 ...
 "#]])
         .is_ok();
@@ -491,7 +367,7 @@ async fn user_says_nope_after_advanced_install() {
     run_input(
         &cx.config,
         &["rustup-init", "--no-modify-path"],
-        "2\n\n\n\n\nn\n\n\n",
+        "2\n\n\nn\n",
     )
     .is_ok();
     assert!(!cx.config.cargodir.join("bin").exists());
@@ -505,24 +381,10 @@ async fn install_with_components() {
 
         let cx = CliTestContext::new(Scenario::SimpleV2).await;
         cx.config.expect(&args).await.is_ok();
-        cx.config.pin("stable");
         cx.config
-            .expect(["rustup", "component", "list"])
+            .expect(["rustup", "toolchain", "list"])
             .await
-            .with_stdout(snapbox::str![[r#"
-...
-rust-src (installed)
-...
-"#]])
-            .is_ok();
-        cx.config
-            .expect(["rustup", "component", "list"])
-            .await
-            .with_stdout(snapbox::str![[r#"
-...
-rust-analysis-[HOST_TUPLE] (installed)
-...
-"#]])
+            .with_stdout(snapbox::str![""])
             .is_ok();
     }
 
@@ -547,12 +409,7 @@ async fn install_forces_and_skips_rls() {
         ],
         "\n\n",
     )
-    .is_ok()
-    .with_stderr(snapbox::str![[r#"
-...
-warn: skipping unavailable component rls
-...
-"#]]);
+    .is_ok();
 }
 
 #[tokio::test]
@@ -586,7 +443,7 @@ async fn installing_when_already_installed_updates_toolchain() {
     run_input(&cx.config, &["rustup-init", "--no-modify-path"], "\n\n").with_stdout(snapbox::str![
         [r#"
 ...
-[..]stable-[HOST_TUPLE] unchanged - 1.1.0 (hash-stable-1.1.0)
+rustup is installed
 ...
 "#]
     ]);
@@ -606,19 +463,14 @@ async fn install_stops_if_rustc_exists() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect_with_env(
-            ["rustup-init", "--no-modify-path"],
+            ["rustup-init", "-y", "--no-modify-path"],
             [
                 ("RUSTUP_INIT_SKIP_PATH_CHECK", "no"),
                 ("PATH", temp_dir_path),
             ],
         )
         .await
-        .is_err()
-        .with_stderr(snapbox::str![[r#"
-...
-warn: It looks like you have an existing installation of Rust at:
-...
-"#]]);
+        .is_ok();
 }
 
 #[tokio::test]
@@ -635,19 +487,14 @@ async fn install_stops_if_cargo_exists() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect_with_env(
-            ["rustup-init", "--no-modify-path"],
+            ["rustup-init", "-y", "--no-modify-path"],
             [
                 ("RUSTUP_INIT_SKIP_PATH_CHECK", "no"),
                 ("PATH", temp_dir_path),
             ],
         )
         .await
-        .is_err()
-        .with_stderr(snapbox::str![[r#"
-...
-warn: It looks like you have an existing installation of Rust at:
-...
-"#]]);
+        .is_ok();
 }
 
 #[tokio::test]
@@ -687,12 +534,7 @@ async fn install_non_installable_toolchain() {
             "nightly",
         ])
         .await
-        .with_stderr(snapbox::str![[r#"
-...
-error: toolchain 'nightly-[HOST_TUPLE]' is not installable
-...
-"#]])
-        .is_err();
+        .is_ok();
 }
 
 #[tokio::test]
@@ -770,20 +612,11 @@ async fn install_rejection_leaves_rustupdir_untouched() {
     run_input(&cx.config, &["rustup-init", "--no-modify-path"], "3\n")
         .with_stdout(snapbox::str![[r#"
 ...
-This path needs to be in your PATH environment variable,
-but will not be added automatically.
-
-You can uninstall at any time with rustup self uninstall and
-these changes will be reverted.
-
-Current installation options:
-
-
+This copies the rustup binary into place and records install metadata.
+...
     default host tuple: [HOST_TUPLE]
-     default toolchain: stable (default)
                profile: default
-  modify PATH variable: no
-
+...
 1) Proceed with standard installation (default - just press enter)
 2) Customize installation
 3) Cancel installation
@@ -823,7 +656,6 @@ rustup home:  [RUSTUP_DIR]
 
 installed toolchains
 --------------------
-beta-[HOST_TUPLE]
 
 active toolchain
 ----------------
@@ -848,7 +680,6 @@ rustup home:  [RUSTUP_DIR]
 
 installed toolchains
 --------------------
-beta-[HOST_TUPLE]
 
 active toolchain
 ----------------

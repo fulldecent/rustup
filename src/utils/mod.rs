@@ -20,8 +20,6 @@ use tracing::{debug, info, warn};
 use url::Url;
 
 use crate::errors::RustupError;
-#[cfg(not(windows))]
-pub(crate) use crate::utils::raw::find_cmd;
 pub(crate) use crate::utils::raw::is_directory;
 pub use crate::utils::raw::{is_file, path_exists};
 
@@ -199,35 +197,6 @@ pub(crate) fn symlink_dir(src: &Path, dest: &Path) -> anyhow::Result<()> {
             dest.display()
         )
     })
-}
-
-/// Attempts to symlink a file, falling back to hard linking if that fails.
-///
-/// If `dest` already exists then it will be replaced.
-pub(crate) fn symlink_or_hardlink_file(src: &Path, dest: &Path) -> anyhow::Result<()> {
-    let _ = fs::remove_file(dest);
-    // Use a relative symlink path if the src and dest are in the same directory.
-    let symlink_target = if src.parent() == dest.parent() {
-        src.file_name().map(Path::new).unwrap_or(src)
-    } else {
-        src
-    };
-    // The error is only used by macos
-    let Err(_err) = symlink_file(symlink_target, dest) else {
-        return Ok(());
-    };
-
-    // Some mac filesystems can do hardlinks to symlinks, some can't.
-    // See rust-lang/rustup#3136 for why it's better never to use them.
-    #[cfg(target_os = "macos")]
-    if fs::symlink_metadata(src)
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        return Err(_err);
-    }
-
-    hardlink_file(src, dest)
 }
 
 pub fn hardlink_file(src: &Path, dest: &Path) -> anyhow::Result<()> {

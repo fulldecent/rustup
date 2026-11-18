@@ -99,6 +99,7 @@ pub(crate) fn question_str(
     }
 }
 
+#[cfg(windows)]
 pub(crate) fn question_bool(
     question: &str,
     default: bool,
@@ -476,23 +477,6 @@ pub fn report_error(e: &anyhow::Error, process: &Process) {
         error!("{:?}", e);
     } else {
         error!("{:#}", e);
-    }
-}
-
-pub(crate) fn ignorable_error(
-    error: &'static str,
-    no_prompt: bool,
-    process: &Process,
-) -> anyhow::Result<()> {
-    let error = anyhow!(error);
-    report_error(&error, process);
-    if no_prompt {
-        warn!("continuing (because the -y flag is set and the error is ignorable)");
-        Ok(())
-    } else if confirm("\nContinue? (y/N)", false, process).unwrap_or(false) {
-        Ok(())
-    } else {
-        Err(error)
     }
 }
 

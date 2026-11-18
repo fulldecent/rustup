@@ -11,7 +11,7 @@ use std::{
 use anyhow::Context;
 use tracing::warn;
 
-use super::install_proxies_with_opts;
+
 use crate::{process::Process, utils};
 
 /// The managed updater path, held together with the lock that protects it.
@@ -101,7 +101,9 @@ impl SelfUpdateLock {
         })
     }
 
-    /// Installs the running executable as `rustup` in `bin_path` and refreshes its proxies.
+    /// Installs the running executable as `rustup` in `bin_path`.
+    ///
+    /// Proxy names such as `cargo` and `rustc` are not created.
     pub(super) fn install_bins(
         &self,
         bin_path: &Path,
@@ -140,8 +142,9 @@ impl SelfUpdateLock {
                 .context("failed to sync the pending rustup binary")?;
         }
 
+        let _ = force_hard_links;
         replace_rustup_binary(&pending, &rustup_path)?;
-        install_proxies_with_opts(bin_path, force_hard_links)
+        Ok(())
     }
 }
 
