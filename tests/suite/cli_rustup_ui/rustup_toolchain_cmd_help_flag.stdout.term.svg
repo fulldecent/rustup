@@ -1,4 +1,4 @@
-<svg width="751px" height="1082px" xmlns="http://www.w3.org/2000/svg">
+<svg width="751px" height="992px" xmlns="http://www.w3.org/2000/svg">
   <style>
     .fg { fill: #AAAAAA }
     .bg { fill: #000000 }
@@ -120,23 +120,13 @@
 </tspan>
     <tspan x="10px" y="910px">
 </tspan>
-    <tspan x="10px" y="928px"><tspan>  The `rustup default` command may be used to both install and set</tspan>
+    <tspan x="10px" y="928px"><tspan>  rustup can also manage symlinked local toolchain builds, which are</tspan>
 </tspan>
-    <tspan x="10px" y="946px"><tspan>  the desired toolchain as default in a single command:</tspan>
+    <tspan x="10px" y="946px"><tspan>  often used for developing Rust itself. For more information see</tspan>
 </tspan>
-    <tspan x="10px" y="964px">
+    <tspan x="10px" y="964px"><tspan>  `rustup toolchain help link`.</tspan>
 </tspan>
-    <tspan x="10px" y="982px"><tspan>    </tspan><tspan class="fg-bright-cyan bold">$ rustup default stable-msvc</tspan>
-</tspan>
-    <tspan x="10px" y="1000px">
-</tspan>
-    <tspan x="10px" y="1018px"><tspan>  rustup can also manage symlinked local toolchain builds, which are</tspan>
-</tspan>
-    <tspan x="10px" y="1036px"><tspan>  often used for developing Rust itself. For more information see</tspan>
-</tspan>
-    <tspan x="10px" y="1054px"><tspan>  `rustup toolchain help link`.</tspan>
-</tspan>
-    <tspan x="10px" y="1072px">
+    <tspan x="10px" y="982px">
 </tspan>
   </text>
 

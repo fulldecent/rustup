@@ -325,7 +325,6 @@ pub(crate) async fn list_toolchains(
     if toolchains.is_empty() {
         info!("no installed toolchains");
     } else {
-        let default_toolchain_name = cfg.get_default()?;
         let active_toolchain_name: Option<ToolchainName> =
             if let Ok(Some((ToolchainNameOrPath::Named(toolchain), _source))) =
                 cfg.maybe_ensure_active_toolchain(None).await
@@ -337,13 +336,11 @@ pub(crate) async fn list_toolchains(
 
         toolchains.sort();
         for toolchain in toolchains {
-            let is_default_toolchain = default_toolchain_name.as_ref() == Some(&toolchain);
             let is_active_toolchain = active_toolchain_name.as_ref() == Some(&toolchain);
 
             print_toolchain(
                 cfg,
                 &toolchain.to_string(),
-                is_default_toolchain,
                 is_active_toolchain,
                 verbose,
                 quiet,
@@ -355,7 +352,6 @@ pub(crate) async fn list_toolchains(
     fn print_toolchain(
         cfg: &Cfg<'_>,
         toolchain: &str,
-        is_default: bool,
         is_active: bool,
         verbose: bool,
         quiet: bool,
@@ -365,12 +361,7 @@ pub(crate) async fn list_toolchains(
             return Ok(());
         }
 
-        let status_str = match (is_default, is_active) {
-            (true, true) => " (active, default)",
-            (true, false) => " (default)",
-            (false, true) => " (active)",
-            (false, false) => "",
-        };
+        let status_str = if is_active { " (active)" } else { "" };
 
         let toolchain_path = cfg.toolchains_dir.join(toolchain);
         let toolchain_meta = fs::symlink_metadata(&toolchain_path)?;

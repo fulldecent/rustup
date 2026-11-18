@@ -140,9 +140,10 @@ async fn rustup_component_list() {
     let name = "rustup_component_list";
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect_with_env(
             ["rustup", "component", "list"],
@@ -172,32 +173,6 @@ fn rustup_component_cmd_remove_cmd_help_flag() {
         "rustup_component_cmd_remove_cmd_help_flag",
         &["component", "remove", "--help"],
     );
-}
-
-#[tokio::test]
-async fn rustup_default() {
-    let name = "rustup_default";
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    cx.config
-        .expect_with_env(
-            ["rustup", "default", "nightly"],
-            [("RUSTUP_TERM_COLOR", "always")],
-        )
-        .await
-        .with_stdout(Data::read_from(
-            Path::new(&format!("tests/suite/cli_rustup_ui/{name}.stdout.term.svg")),
-            None,
-        ))
-        .with_stderr(Data::read_from(
-            Path::new(&format!("tests/suite/cli_rustup_ui/{name}.stderr.term.svg")),
-            None,
-        ))
-        .is_ok();
-}
-
-#[test]
-fn rustup_default_cmd_help_flag() {
-    test_help("rustup_default_cmd_help_flag", &["default", "--help"]);
 }
 
 #[test]
@@ -288,13 +263,17 @@ async fn rustup_show_toolchain() {
     let name = "rustup_show_toolchain";
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect_with_env(["rustup", "show"], [("RUSTUP_TERM_COLOR", "always")])
         .await
-        .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
+        .extend_redactions([
+            ("[RUSTUP_DIR]", &cx.config.rustupdir.to_string()),
+            ("[CWD]", &cx.config.current_dir().display().to_string()),
+        ])
         .with_stdout(Data::read_from(
             Path::new(&format!("tests/suite/cli_rustup_ui/{name}.stdout.term.svg")),
             None,

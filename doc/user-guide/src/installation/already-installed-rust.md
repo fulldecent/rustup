@@ -24,10 +24,11 @@ For example, using the [toolchain override shorthand], you can run `cargo +syste
 to build with the system toolchain, or `cargo +nightly build` to build with nightly.
 
 If you wish to develop with the system toolchain (e.g. for distribution packages),
-you may want to make it your [default toolchain]:
+name it in `rust-toolchain.toml`:
 
-```console
-rustup default system
+```toml
+[toolchain]
+channel = "system"
 ```
 
 ## Ensure the correct `$PATH` configuration
@@ -89,4 +90,3 @@ installed:
 
 [rustup.rs]: https://rustup.rs
 [toolchain override shorthand]: ../overrides.md#toolchain-override-shorthand
-[default toolchain]: ../overrides.md#default-toolchain

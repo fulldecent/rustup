@@ -55,20 +55,15 @@ $ rustup run nightly rustc --version
 rustc 1.9.0-nightly (02310fd31 2016-03-19)
 ```
 
-But more likely you want to use it for a while. To switch to nightly globally,
-change [the default] with `rustup default nightly`:
+To use nightly for a project, name it in `rust-toolchain.toml`:
 
-```console
-$ rustup default nightly
-info: using existing install for 'nightly'
-info: default toolchain set to 'nightly'
-
-  nightly unchanged: rustc 1.9.0-nightly (02310fd31 2016-03-19)
-
+```toml
+[toolchain]
+channel = "nightly"
 ```
 
-Now any time you run `cargo` or `rustc` you will be running the nightly
-compiler.
+`cargo` and `rustc` in that directory then run the nightly compiler. Elsewhere,
+pass `+nightly`.
 
 With nightly installed any time you run `rustup update`, the nightly channel
 will be updated in addition to stable:
@@ -84,8 +79,6 @@ info: downloading self-update
   nightly unchanged: rustc 1.9.0-nightly (02310fd31 2016-03-19)
 
 ```
-
-[the default]: ../overrides.md#default-toolchain
 
 ## Nightly availability
 

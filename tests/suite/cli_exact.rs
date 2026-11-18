@@ -23,7 +23,6 @@ async fn update_once() {
 info: syncing channel updates for nightly-[HOST_TUPLE]
 info: latest update on 2015-01-02 for version 1.3.0 (hash-nightly-2)
 info: downloading 4 components
-info: default toolchain set to nightly
 
 "#]]);
     cx.config
@@ -305,38 +304,6 @@ nightly-[HOST_TUPLE] - update available: 1.2.0 (hash-nightly-1) -> 1.3.0 (hash-n
 "#]]);
 }
 
-#[tokio::test]
-async fn default() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    cx.config
-        .expect(["rustup", "default", "nightly"])
-        .await
-        .is_ok()
-        .with_stdout(snapbox::str![[r#"
-
-  nightly-[HOST_TUPLE] installed - 1.3.0 (hash-nightly-2)
-
-
-"#]])
-        .with_stderr(snapbox::str![[r#"
-info: syncing channel updates for nightly-[HOST_TUPLE]
-info: latest update on 2015-01-02 for version 1.3.0 (hash-nightly-2)
-info: downloading 4 components
-info: default toolchain set to nightly
-
-"#]]);
-    cx.config
-        .expect(["rustup", "component", "list", "--installed"])
-        .await
-        .is_ok()
-        .with_stdout(snapbox::str![[r#"
-cargo-[HOST_TUPLE]
-rust-docs-[HOST_TUPLE]
-rust-std-[HOST_TUPLE]
-rustc-[HOST_TUPLE]
-
-"#]]);
-}
 
 
 #[tokio::test]
@@ -386,56 +353,7 @@ error: [..]invalid toolchain name: 'nightly-2016-03-1'
 "#]]);
 }
 
-#[tokio::test]
-async fn default_custom_not_installed_toolchain() {
-    let cx = CliTestContext::new(Scenario::None).await;
-    // installable toolchains require 2 digits in the DD and MM fields, so this is
-    // treated as a custom toolchain, which isn't installed.
-    cx.config
-        .expect(["rustup", "default", "nightly-2016-03-1"])
-        .await
-        .is_err()
-        .with_stderr(snapbox::str![[r#"
-error: toolchain 'nightly-2016-03-1' is not installed
-...
-"#]]);
-}
 
-#[tokio::test]
-async fn default_none() {
-    let cx = CliTestContext::new(Scenario::None).await;
-    cx.config
-        .expect(["rustup", "default", "none"])
-        .await
-        .is_ok()
-        .with_stderr(snapbox::str![[r#"
-info: default toolchain unset
-warn: no toolchain installed and no default toolchain set
-help: run 'rustup default stable' to download the latest stable release of Rust and set it as your default toolchain.
-
-"#]]);
-
-    cx.config
-        .expect(["rustup", "default"])
-        .await
-        .is_err()
-        .with_stdout(snapbox::str![[""]])
-        .with_stderr(snapbox::str![[r#"
-error: no default toolchain is configured
-
-"#]]);
-
-    cx.config
-        .expect(["rustc", "--version"])
-        .await
-        .is_err()
-        .with_stdout(snapbox::str![[""]])
-        .with_stderr(snapbox::str![[r#"
-error: rustup could not choose a version of rustc to run, because one wasn't specified explicitly, and no default is configured.
-help: run 'rustup default stable' to download the latest stable release of Rust and set it as your default toolchain.
-
-"#]]);
-}
 
 #[tokio::test]
 async fn list_targets() {
@@ -451,9 +369,10 @@ async fn list_targets() {
     let expected = format!("{}\n{}\n{}\n", sorted[0], sorted[1], sorted[2]);
 
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "target", "add", CROSS_ARCH1])
         .await
@@ -478,9 +397,10 @@ async fn list_targets_quiet() {
     let expected = format!("{}\n{}\n{}\n", sorted[0], sorted[1], sorted[2]);
 
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "target", "add", CROSS_ARCH1])
         .await
@@ -505,9 +425,10 @@ async fn list_installed_targets() {
     let expected = format!("{}\n{}\n{}\n", sorted[0], sorted[1], sorted[2]);
 
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "target", "add", CROSS_ARCH1])
         .await
@@ -530,9 +451,10 @@ async fn list_installed_targets() {
 async fn cross_install_indicates_target() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     // TODO error 'nightly-x86_64-apple-darwin' is not installed
     cx.config
         .expect(["rustup", "target", "add", CROSS_ARCH1])
@@ -623,9 +545,10 @@ async fn install_unreleased_component() {
     // Initial channel content is host + rls + multiarch-std
     cx.config.set_current_dist_date("2019-09-12");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "component", "add", "rls"])
         .await

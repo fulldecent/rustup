@@ -29,7 +29,7 @@
 </tspan>
     <tspan x="10px" y="100px"><tspan class="fg-bright-green bold">--------------------</tspan>
 </tspan>
-    <tspan x="10px" y="118px"><tspan>nightly-[HOST_TUPLE]</tspan><tspan class="fg-bright-blue bold"> (active, default)</tspan>
+    <tspan x="10px" y="118px"><tspan>nightly-[HOST_TUPLE]</tspan><tspan class="fg-bright-blue bold"> (active)</tspan>
 </tspan>
     <tspan x="10px" y="136px">
 </tspan>
@@ -39,7 +39,7 @@
 </tspan>
     <tspan x="10px" y="190px"><tspan>name: nightly-[HOST_TUPLE]</tspan>
 </tspan>
-    <tspan x="10px" y="208px"><tspan>active because: it's the default toolchain</tspan>
+    <tspan x="10px" y="208px"><tspan>active because: overridden by '[CWD]/rust-toolchain.toml'</tspan>
 </tspan>
     <tspan x="10px" y="226px"><tspan>installed targets:</tspan>
 </tspan>

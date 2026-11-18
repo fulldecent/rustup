@@ -67,7 +67,7 @@
 - `RUSTUP_CONCURRENT_DOWNLOADS` _unstable_ (default: 2). Controls the number of
   downloads made concurrently.
 
-- `RUSTUP_TOOLCHAIN_SOURCE` _unstable_. Set by rustup to tell the child how the toolchain was selected (`cli`, `toolchain-file`, or `default`). Non-rustup tools should not set this environment variable.
+- `RUSTUP_TOOLCHAIN_SOURCE` _unstable_. Set by rustup to tell the child how the toolchain was selected (`cli` or `toolchain-file`). Non-rustup tools should not set this environment variable.
 
 [directive syntax]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
 [dc]: https://docs.docker.com/storage/storagedriver/overlayfs-driver/#modifying-files-or-directories

@@ -44,10 +44,15 @@ After installing rustup with your favorite package manager, there are usually tw
 
 - If your package manager has made the `rustup` command available
   together with proxies for Rust tools such as `rustc` and `cargo`,
-  picking a default toolchain (e.g. `stable`) would usually be enough:
+  install a toolchain and name it in `rust-toolchain.toml`:
 
   ```sh
-  $ rustup default stable
+  $ rustup toolchain install stable
+  ```
+
+  ```toml
+  [toolchain]
+  channel = "stable"
   ```
 
   > As of 2024/12/23, this is the case for
@@ -61,8 +66,8 @@ After installing rustup with your favorite package manager, there are usually tw
   $ rustup-init
   ```
 
-  This will allow you to perform the initial setup of `rustup`, populate all the proxies
-  managed by rustup, and install a default toolchain.
+  This will allow you to perform the initial setup of `rustup` and populate the proxies
+  managed by rustup. Install a toolchain afterwards with `rustup toolchain install`.
 
   > As of 2024/12/23, this is the case for
   > [DNF](https://developer.fedoraproject.org/tech/languages/rust/further-reading.html).

@@ -725,6 +725,7 @@ async fn managed_updater_survives_concurrent_proxy_cleanup() {
         .expect(["rustup-init", "-y", "--no-modify-path"])
         .await
         .is_ok();
+    cx.config.pin("stable");
 
     let rustup = cx.config.cargodir.join(format!("bin/rustup{EXE_SUFFIX}"));
     let before_hash = calc_hash(&rustup);
@@ -751,6 +752,7 @@ async fn self_update_replacement_survives_proxy_cleanup() {
         .expect(["rustup-init", "-y", "--no-modify-path"])
         .await
         .is_ok();
+    cx.config.pin("stable");
 
     let rustup = cx.config.cargodir.join(format!("bin/rustup{EXE_SUFFIX}"));
     let before_hash = calc_hash(&rustup);
@@ -1035,9 +1037,10 @@ async fn updater_is_deleted_after_running_rustc() {
         .await
         .is_ok();
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config.expect(["rustup", "self", "update"]).await.is_ok();
     wait_for_completed_update(&cx.config.rustupdir.rustupdir);
 
@@ -1054,9 +1057,10 @@ async fn rustup_still_works_after_update() {
         .await
         .is_ok();
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config.expect(["rustup", "self", "update"]).await.is_ok();
     cx.config
         .expect(["rustc", "--version"])
@@ -1067,9 +1071,10 @@ async fn rustup_still_works_after_update() {
 "#]])
         .is_ok();
     cx.config
-        .expect(["rustup", "default", "beta"])
+        .expect(["rustup", "toolchain", "install", "beta"])
         .await
         .is_ok();
+    cx.config.pin("beta");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -1141,6 +1146,7 @@ async fn reinstall_specifying_toolchain() {
 #[tokio::test]
 async fn reinstall_specifying_component() {
     let cx = setup_installed().await;
+    cx.config.pin("stable");
     cx.config
         .expect(["rustup", "component", "add", "rls"])
         .await
@@ -1194,7 +1200,7 @@ async fn install_sets_up_stable_unless_a_different_default_is_requested() {
         .await
         .is_ok();
     cx.config
-        .expect(["rustc", "--version"])
+        .expect(["rustup", "run", "nightly", "rustc", "--version"])
         .await
         .with_stdout(snapbox::str![[r#"
 1.3.0 (hash-nightly-2)
@@ -1207,9 +1213,16 @@ async fn install_sets_up_stable_unless_a_different_default_is_requested() {
 async fn install_sets_up_stable_unless_there_is_already_a_default() {
     let cx = setup_installed().await;
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect([
+            "rustup-init",
+            "-y",
+            "--default-toolchain",
+            "nightly",
+            "--no-modify-path",
+        ])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "toolchain", "remove", "stable"])
         .await
@@ -1276,6 +1289,7 @@ async fn rls_proxy_set_up_after_install() {
             .expect(["rustup-init", "-y", "--no-modify-path"])
             .await
             .is_ok();
+        cx.config.pin("stable");
     }
 
     cx.config
@@ -1283,7 +1297,7 @@ async fn rls_proxy_set_up_after_install() {
         .await
         .with_stderr(snapbox::str![[r#"
 error: 'rls[EXE]' is not installed for the toolchain 'stable-[HOST_TUPLE]'.
-help: run `rustup component add rls` to install it
+help: run `rustup component add --toolchain stable-[HOST_TUPLE] rls` to install it
 
 "#]])
         .is_err();
@@ -1389,6 +1403,7 @@ async fn install_with_components_and_targets() {
         ])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "target", "list"])
         .await
@@ -1422,6 +1437,7 @@ async fn install_minimal_profile() {
         ])
         .await
         .is_ok();
+    cx.config.pin("stable");
 
     cx.config.expect_component_executable("rustup").await;
     cx.config.expect_component_executable("rustc").await;

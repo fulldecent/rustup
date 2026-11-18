@@ -293,10 +293,7 @@ impl<'a> ChannelToolchain<'a> {
                 ))
             } else {
                 // available, not installed, recommend installation
-                let selector = match self.toolchain.cfg.get_default()? {
-                    Some(ToolchainName::Channel(n)) if &n == desc => String::new(),
-                    _ => format!("--toolchain {} ", self.toolchain.name()),
-                };
+                let selector = format!("--toolchain {} ", self.toolchain.name());
                 Err(anyhow!(
                     "'{binary_lossy}' is not installed for the toolchain '{desc}'.\nhelp: run `rustup component add {selector}{component_name}` to install it"
                 ))

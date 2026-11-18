@@ -182,7 +182,11 @@ mod tests {
         .unwrap();
 
         let cfg = Cfg::from_env(rustup_home.path().to_owned(), true, false, &process).unwrap();
-        cfg.set_default(Some(&TOOLCHAIN.parse().unwrap())).unwrap();
+        fs::write(
+            rustup_home.path().join("rust-toolchain.toml"),
+            format!("[toolchain]\nchannel = \"{TOOLCHAIN}\"\n"),
+        )
+        .unwrap();
 
         assert_eq!(
             complete(&cfg, &["rustup", "target", "remove", "x86_64"], 3),

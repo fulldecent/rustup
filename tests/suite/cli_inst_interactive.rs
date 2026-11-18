@@ -391,7 +391,7 @@ async fn with_non_default_toolchain_still_prompts() {
 ...
 installed toolchains
 --------------------
-nightly-[HOST_TUPLE] (active, default)
+nightly-[HOST_TUPLE]
 ...
 "#]])
         .is_ok();
@@ -418,7 +418,7 @@ async fn with_non_release_channel_non_default_toolchain() {
 ...
 installed toolchains
 --------------------
-nightly-2015-01-02-[HOST_TUPLE] (active, default)
+nightly-2015-01-02-[HOST_TUPLE]
 ...
 "#]])
         .is_ok();
@@ -441,7 +441,7 @@ async fn set_nightly_toolchain() {
 ...
 installed toolchains
 --------------------
-nightly-[HOST_TUPLE] (active, default)
+nightly-[HOST_TUPLE]
 ...
 "#]])
         .is_ok();
@@ -479,7 +479,7 @@ async fn set_nightly_toolchain_and_unset() {
 ...
 installed toolchains
 --------------------
-beta-[HOST_TUPLE] (active, default)
+beta-[HOST_TUPLE]
 ...
 "#]])
         .is_ok();
@@ -505,6 +505,7 @@ async fn install_with_components() {
 
         let cx = CliTestContext::new(Scenario::SimpleV2).await;
         cx.config.expect(&args).await.is_ok();
+        cx.config.pin("stable");
         cx.config
             .expect(["rustup", "component", "list"])
             .await
@@ -822,14 +823,11 @@ rustup home:  [RUSTUP_DIR]
 
 installed toolchains
 --------------------
-beta-[HOST_TUPLE] (active, default)
+beta-[HOST_TUPLE]
 
 active toolchain
 ----------------
-name: beta-[HOST_TUPLE]
-active because: it's the default toolchain
-installed targets:
-  [HOST_TUPLE]
+no active toolchain
 
 "#]]);
 
@@ -854,8 +852,7 @@ beta-[HOST_TUPLE]
 
 active toolchain
 ----------------
-name: beta-[CROSS_ARCH_I]
-active because: it's the default toolchain
+no active toolchain
 
 "#]]);
 }

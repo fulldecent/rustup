@@ -7,18 +7,17 @@ select that toolchain:
 1. A [toolchain override shorthand] used on the command-line, such as `cargo
 +beta`.
 2. The [`rust-toolchain.toml`] file.
-3. The [default toolchain].
 
 The toolchain is chosen in the order listed above, using the first one that is
 specified. `rust-toolchain.toml` is discovered by walking from the current
-directory toward the filesystem root, and the nearest file wins.
+directory toward the filesystem root, and the nearest file wins. If neither
+is present, the command fails.
 
 To verify which toolchain is active, you can use `rustup show`.
 
 [toolchain]: concepts/toolchains.md
 [toolchain override shorthand]: #toolchain-override-shorthand
 [`rust-toolchain.toml`]: #the-toolchain-file
-[default toolchain]: #default-toolchain
 
 ## Toolchain override shorthand
 
@@ -126,17 +125,7 @@ additive.
 
 [cross-compilation]: https://rust-lang.github.io/rustup/cross-compilation.html
 
-## Default toolchain
-
-If no other overrides are set, the global default toolchain will be used. This
-default can be chosen when `rustup` is [installed]. The `rustup default`
-command can be used to set and query the current default. Run `rustup default`
-without any arguments to print the current default. Specify a toolchain as an
-argument to change the default:
-
-```console
-rustup default nightly-2020-07-27
-```
-
-[installed]: installation/index.md
-[#1397]: https://github.com/rust-lang/rustup/issues/1397
+If neither an in-line `+toolchain` argument nor a `rust-toolchain.toml` file is
+present, rustup exits with an error. Install a toolchain with `rustup toolchain
+install`, then name it in `rust-toolchain.toml`, or pass `+toolchain` on the
+command.

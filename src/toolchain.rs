@@ -34,7 +34,7 @@ pub(crate) use channels::ChannelToolchain;
 
 mod names;
 pub(crate) use names::{
-    CustomToolchainName, MaybeChannelToolchainName, MaybePartialToolchainName, Override,
+    CustomToolchainName, MaybeChannelToolchainName, Override,
     PartialToolchainName, PartialToolchainNameOrPath, ToolchainName, ToolchainNameExt,
     ToolchainNameOrPath, ToolchainPath,
 };
@@ -89,9 +89,6 @@ impl<'a> Toolchain<'a> {
                 "the toolchain file at '{}' specifies an uninstalled toolchain",
                 utils::canonicalize_path(path).display(),
             ),
-            ActiveSource::Default => {
-                "the default toolchain does not describe an installed toolchain".to_string()
-            }
         };
 
         Err(anyhow!(source_err).context(format!("override toolchain '{name}' is not installed")))
@@ -394,29 +391,38 @@ impl<'a> Toolchain<'a> {
         };
 
         let bin_path = self.path.join("bin").join(&binary);
-        // A missing binary used to be launched by name so PATH could supply it.
-        // That re-entered this proxy, which then had to be told the toolchain
-        // again. Report the miss directly instead.
         if !utils::is_file(&bin_path) {
             let binary_lossy: String = binary.to_string_lossy().into();
-            if matches!(
-                &self.name,
-                ToolchainNameOrPath::Named(ToolchainName::Channel(_))
-            ) {
-                // NOTE: This is a bit of an awkward cast from general `Toolchain` to more
-                // specialised `ChannelToolchain` which is just a newtype over the former; in
-                // theory, a `.clone()` is not needed because for `.recursion_error()` we would
-                // only need a `&ChannelToolchain`, which is safely convertible from
-                // `&Toolchain`.
-                let distributable = ChannelToolchain::try_from(self.clone())?;
-                return Err(distributable.recursion_error(binary_lossy).unwrap_err());
-            } else {
-                let t = &self.name;
-                return Err(anyhow!(
-                    "'{binary_lossy}' is not installed for the custom toolchain '{t}'.\nnote: this is a custom toolchain, which cannot use `rustup component add`\n\
-                    help: if you built this toolchain from source, and used `rustup toolchain link`, then you may be able to build the component with `x.py`"
-                ));
+            let stem = match EXE_SUFFIX {
+                "" => binary_lossy.as_str(),
+                suffix => binary_lossy.strip_suffix(suffix).unwrap_or(&binary_lossy),
+            };
+            // A missing proxy (rustc, cargo, …) must not be launched by name.
+            // PATH would find this rustup and re-enter it. Any other command is
+            // an ordinary program and is resolved from PATH.
+            if crate::is_proxyable_tools(stem).is_ok() {
+                if matches!(
+                    &self.name,
+                    ToolchainNameOrPath::Named(ToolchainName::Channel(_))
+                ) {
+                    // NOTE: This is a bit of an awkward cast from general `Toolchain` to more
+                    // specialised `ChannelToolchain` which is just a newtype over the former; in
+                    // theory, a `.clone()` is not needed because for `.recursion_error()` we would
+                    // only need a `&ChannelToolchain`, which is safely convertible from
+                    // `&Toolchain`.
+                    let distributable = ChannelToolchain::try_from(self.clone())?;
+                    return Err(distributable.recursion_error(binary_lossy).unwrap_err());
+                } else {
+                    let t = &self.name;
+                    return Err(anyhow!(
+                        "'{binary_lossy}' is not installed for the custom toolchain '{t}'.\nnote: this is a custom toolchain, which cannot use `rustup component add`\n\
+                        help: if you built this toolchain from source, and used `rustup toolchain link`, then you may be able to build the component with `x.py`"
+                    ));
+                }
             }
+            let mut cmd = Command::new(&binary_lossy);
+            self.set_env(&mut cmd);
+            return Ok(cmd);
         }
         let mut cmd = Command::new(&bin_path);
         self.set_env(&mut cmd);

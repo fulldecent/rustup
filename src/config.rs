@@ -111,7 +111,6 @@ impl<T: Into<String>> From<T> for OverrideFile {
 // Represents the source that determined the current active toolchain.
 #[derive(Clone, Debug)]
 pub(crate) enum ActiveSource {
-    Default,
     CommandLine,
     ToolchainFile(PathBuf),
 }
@@ -119,7 +118,6 @@ pub(crate) enum ActiveSource {
 impl ActiveSource {
     pub fn to_reason(&self) -> String {
         match self {
-            Self::Default => String::from("it's the default toolchain"),
             Self::CommandLine => String::from("overridden by +toolchain on the command line"),
             Self::ToolchainFile(path) => format!("overridden by '{}'", path.display()),
         }
@@ -129,7 +127,6 @@ impl ActiveSource {
 impl Display for ActiveSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::Default => "default",
             Self::CommandLine => "cli",
             Self::ToolchainFile(_) => "toolchain-file",
         })
@@ -225,10 +222,9 @@ impl OverrideCfg {
                     path.display()
                 )
             }
-            (None, None) => Override::Explicit(
-                cfg.get_default_resolvable()?
-                    .ok_or_else(|| no_toolchain_error(cfg.process))?,
-            ),
+            (None, None) => {
+                bail!("rust-toolchain.toml must set 'channel' or 'path'");
+            }
         };
         let toolchain_name = toolchain_name.resolve(cfg)?;
         Ok(match toolchain_name {
@@ -620,17 +616,14 @@ impl<'a> Cfg<'a> {
     pub(crate) fn active_toolchain(
         &self,
     ) -> anyhow::Result<Option<(ToolchainNameOrPath, ActiveSource)>> {
-        Ok(
-            if let Some((override_config, source)) = self.find_override_config()? {
-                Some((
-                    override_config.into_local_toolchain_name(&self.default_host_tuple()?)?,
-                    source,
-                ))
-            } else {
-                self.get_default()?
-                    .map(|x| (x.into(), ActiveSource::Default))
-            },
-        )
+        if let Some((override_config, source)) = self.find_override_config()? {
+            Ok(Some((
+                override_config.into_local_toolchain_name(&self.default_host_tuple()?)?,
+                source,
+            )))
+        } else {
+            Ok(None)
+        }
     }
 
     pub(crate) fn find_override_config(
@@ -800,17 +793,6 @@ impl<'a> Cfg<'a> {
                 UpdateStatus::Unchanged
             };
             Ok((EnsureInstalled::new(toolchain, status), source))
-        } else if let Some(toolchain) = self.get_default()? {
-            let source = ActiveSource::Default;
-            let status = if let ToolchainName::Channel(desc) = &toolchain {
-                self.ensure_installed(desc, vec![], vec![], None, force_non_host, verbose)
-                    .await?
-                    .status
-            } else {
-                Toolchain::with_source(self, toolchain.clone().into(), &source)?;
-                UpdateStatus::Unchanged
-            };
-            Ok((EnsureInstalled::new(toolchain.into(), status), source))
         } else {
             Err(no_toolchain_error(self.process))
         }

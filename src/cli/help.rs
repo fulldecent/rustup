@@ -73,14 +73,6 @@ pub(crate) fn install_help() -> String {
     )
 }
 
-pub(crate) fn default_help() -> String {
-    format!(
-        r"{HEADER}Discussion:{HEADER:#}
-  Sets the default toolchain to the one specified. If the toolchain
-  is not already installed then it is installed first."
-    )
-}
-
 pub(crate) fn toolchain_help() -> String {
     format!(
         r"{HEADER}Discussion:{HEADER:#}
@@ -117,11 +109,6 @@ pub(crate) fn toolchain_help() -> String {
   inferred, so the above could be written:
 
     {LITERAL}$ rustup toolchain install stable-msvc{LITERAL:#}
-
-  The `rustup default` command may be used to both install and set
-  the desired toolchain as default in a single command:
-
-    {LITERAL}$ rustup default stable-msvc{LITERAL:#}
 
   rustup can also manage symlinked local toolchain builds, which are
   often used for developing Rust itself. For more information see
@@ -351,12 +338,6 @@ pub(crate) fn resolvable_toolchain_arg_help() -> &'static str {
                                        '1.8.0', or a custom toolchain name. For more information see `rustup \
                                        help toolchain`"
 }
-pub(crate) fn maybe_resolvable_toolchain_arg_help() -> &'static str {
-    "'none', a toolchain name, such as 'stable', 'nightly', \
-                                       '1.8.0', or a custom toolchain name. For more information see `rustup \
-                                       help toolchain`"
-}
-
 pub(crate) fn topic_arg_help() -> &'static str {
     "Topic such as 'core', 'fn', 'usize', 'eprintln!', \
                                    'core::arch', 'alloc::format!', 'std::fs', \

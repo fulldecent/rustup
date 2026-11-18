@@ -18,9 +18,8 @@ the log lines in a format that mimics the "legacy" `stderr` output in older
 versions of rustup:
 
 ```console
-> rustup default stable
-info: using existing install for 'stable-aarch64-apple-darwin'
-info: default toolchain set to 'stable-aarch64-apple-darwin'
+> rustup toolchain install stable
+info: using existing install for stable-aarch64-apple-darwin
 
   stable-aarch64-apple-darwin unchanged - rustc 1.79.0 (129f3b996 2024-06-10)
 ```
@@ -29,9 +28,8 @@ However, once `RUSTUP_LOG` is set to any value, rustup's "custom logging mode" w
 be activated, and `tracing_subscriber`'s builtin output format will be used instead:
 
 ```console
-> RUSTUP_LOG=trace rustup default stable
-2024-06-16T12:08:48.732894Z  INFO rustup::cli::common: using existing install for 'stable-aarch64-apple-darwin'
-2024-06-16T12:08:48.739232Z  INFO rustup::cli::common: default toolchain set to 'stable-aarch64-apple-darwin'
+> RUSTUP_LOG=trace rustup toolchain install stable
+2024-06-16T12:08:48.732894Z  INFO rustup::cli::common: using existing install for stable-aarch64-apple-darwin
 
   stable-aarch64-apple-darwin unchanged - rustc 1.79.0 (129f3b996 2024-06-10)
 ```

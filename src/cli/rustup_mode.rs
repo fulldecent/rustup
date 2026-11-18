@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     env::consts::EXE_SUFFIX,
     fmt,
     io::{self, Write},
@@ -32,27 +31,25 @@ use crate::{
         completions, docs,
         errors::CliError,
         help::{
-            check_help, completions_help, default_help, doc_help, install_help,
-            maybe_resolvable_toolchain_arg_help, official_toolchain_arg_help,
+            check_help, completions_help, doc_help, install_help, official_toolchain_arg_help,
             resolvable_local_toolchain_arg_help, resolvable_toolchain_arg_help, run_help,
-            rustup_help, show_active_toolchain_help,
-            show_help, toolchain_help, toolchain_install_help, toolchain_link_help, topic_arg_help,
-            update_help,
+            rustup_help, show_active_toolchain_help, show_help, toolchain_help,
+            toolchain_install_help, toolchain_link_help, topic_arg_help, update_help,
         },
         self_update::{self, SelfUpdateMode, check_rustup_update},
     },
     command, component_for_bin,
-    config::{ActiveSource, Cfg, OverrideCfg, OverrideFile},
+    config::{ActiveSource, Cfg, OverrideFile},
     dist::{
         DistOptions, PartialChannelToolchainName, Profile, Switch, TargetTuple,
         download::DownloadCfg,
         manifest::{Component, ManifestWithHash},
     },
-    errors::{DEFAULT_STABLE_HINT, RustupError},
+    errors::RustupError,
     install::{InstallMethod, UpdateStatus},
     process::{ColorableTerminal, Process},
     toolchain::{
-        ChannelToolchain, CustomToolchainName, MaybePartialToolchainName, Override,
+        ChannelToolchain, CustomToolchainName, Override,
         PartialToolchainName, PartialToolchainNameOrPath, Toolchain, ToolchainName,
         ToolchainNameOrPath,
     },
@@ -150,17 +147,6 @@ enum RustupSubcmd {
     Toolchain {
         #[command(subcommand)]
         subcmd: ToolchainSubcmd,
-    },
-
-    /// Set the default toolchain
-    #[command(after_help = default_help())]
-    Default {
-        #[arg(help = maybe_resolvable_toolchain_arg_help())]
-        toolchain: Option<Override<MaybePartialToolchainName>>,
-
-        /// Install toolchains that require an emulator. See https://github.com/rust-lang/rustup/wiki/Non-host-toolchains
-        #[arg(long)]
-        force_non_host: bool,
     },
 
     /// Show the active and installed toolchains or profiles
@@ -324,7 +310,6 @@ impl RustupSubcmd {
             Self::Check { .. }
             | Self::Completions { .. }
             | Self::Component { .. }
-            | Self::Default { .. }
             | Self::DumpTestament
             | Self::Install { .. }
             | Self::Self_ { .. }
@@ -338,7 +323,7 @@ impl RustupSubcmd {
         }
     }
 
-    /// Returns whether rustup should warn about having no default toolchain and no installed toolchains.
+    /// Returns whether rustup should warn about having no installed toolchains.
     fn should_warn_empty_setup(&self) -> bool {
         match self {
             // These subcommands are not about toolchains, so the hint would be noise.
@@ -348,7 +333,6 @@ impl RustupSubcmd {
             // the command has completed.
             Self::Check { .. }
             | Self::Component { .. }
-            | Self::Default { .. }
             | Self::Doc { .. }
             | Self::Install { .. }
             | Self::Run { .. }
@@ -478,10 +462,6 @@ struct UpdateOpts {
     /// Install toolchains that require an emulator. See https://github.com/rust-lang/rustup/wiki/Non-host-toolchains
     #[arg(long)]
     force_non_host: bool,
-
-    /// Set the installed toolchain as the default toolchain
-    #[arg(long)]
-    default: bool,
 
     /// Indicate update status via exit code
     #[arg(long)]
@@ -753,10 +733,6 @@ pub async fn main(
             ToolchainSubcmd::Pin { qualified } => pin_active_toolchain(qualified, cfg),
         },
         RustupSubcmd::Check { opts } => check_updates(cfg, opts).await,
-        RustupSubcmd::Default {
-            toolchain,
-            force_non_host,
-        } => default_(cfg, toolchain, force_non_host).await,
         RustupSubcmd::Target { subcmd } => match subcmd {
             TargetSubcmd::List {
                 toolchain,
@@ -832,8 +808,10 @@ pub async fn main(
         }
     }?;
 
-    if should_warn && cfg.list_toolchains(true)?.is_empty() && cfg.get_default()?.is_none() {
-        warn!("no toolchain installed and no default toolchain set\n{DEFAULT_STABLE_HINT}");
+    if should_warn && cfg.list_toolchains(true)?.is_empty() {
+        warn!(
+            "no toolchain installed\nhelp: run 'rustup toolchain install stable' to download the latest stable release of Rust, then name it in rust-toolchain.toml"
+        );
     }
 
     if should_notify && let Err(e) = cfg.notify_release() {
@@ -841,55 +819,6 @@ pub async fn main(
     }
 
     Ok(exit_code)
-}
-
-async fn default_(
-    cfg: &Cfg<'_>,
-    toolchain: Option<Override<MaybePartialToolchainName>>,
-    force_non_host: bool,
-) -> anyhow::Result<ExitCode> {
-    common::warn_if_host_is_emulated(cfg.process);
-
-    if let Some(toolchain) = toolchain {
-        match toolchain.resolve(cfg)? {
-            MaybePartialToolchainName::None => {
-                cfg.set_default(None)?;
-            }
-            MaybePartialToolchainName::Some(PartialToolchainName::Custom(toolchain_name)) => {
-                Toolchain::new(cfg, toolchain_name.clone().into())?;
-                cfg.set_default(Some(&toolchain_name.into()))?;
-            }
-            MaybePartialToolchainName::Some(PartialToolchainName::Channel(toolchain)) => {
-                let desc = toolchain.clone().complete(&cfg.default_host_tuple()?)?;
-                let status = cfg
-                    .ensure_installed(&desc, vec![], vec![], None, force_non_host, true)
-                    .await?
-                    .status;
-
-                cfg.set_default(Some(&toolchain.into()))?;
-
-                writeln!(cfg.process.stdout().lock())?;
-
-                common::show_channel_update(cfg, PackageUpdate::Toolchain(desc), Ok(status))?;
-            }
-        };
-
-        if let Some((toolchain, source)) = cfg.active_toolchain()?
-            && !matches!(source, ActiveSource::Default)
-        {
-            info!(
-                "note that the toolchain '{toolchain}' is currently in use ({})",
-                source.to_reason()
-            );
-        }
-    } else {
-        let default_toolchain = cfg
-            .get_default()?
-            .ok_or_else(|| anyhow!("no default toolchain is configured"))?;
-        writeln!(cfg.process.stdout().lock(), "{default_toolchain} (default)")?;
-    }
-
-    Ok(ExitCode::SUCCESS)
 }
 
 async fn check_updates(cfg: &Cfg<'_>, opts: CheckOpts) -> anyhow::Result<ExitCode> {
@@ -1097,14 +1026,8 @@ async fn update(
             common::show_channel_update(
                 cfg,
                 PackageUpdate::Toolchain(desc.clone()),
-                Ok(status.clone()),
+                Ok(status),
             )?;
-
-            if opts.default
-                || (cfg.get_default()?.is_none() && matches!(status, UpdateStatus::Installed))
-            {
-                cfg.set_default(Some(&name.into()))?;
-            }
         }
         exit_code &= self_update_mode.update(should_self_update, &dl_cfg).await?;
     } else if ensure_active_toolchain {
@@ -1217,18 +1140,10 @@ async fn show(cfg: &Cfg<'_>, verbose: bool) -> anyhow::Result<ExitCode> {
     // show installed toolchains
     print_header(&t, "installed toolchains")?;
 
-    let default_toolchain_name = cfg.get_default()?;
     let last_index = installed_toolchains.len().wrapping_sub(1);
     for (n, toolchain_name) in installed_toolchains.into_iter().enumerate() {
-        let is_default_toolchain = default_toolchain_name.as_ref() == Some(&toolchain_name);
         let is_active_toolchain = active_toolchain_name == Some(&toolchain_name);
-
-        let status_str = match (is_active_toolchain, is_default_toolchain) {
-            (true, true) => " (active, default)",
-            (true, false) => " (active)",
-            (false, true) => " (default)",
-            (false, false) => "",
-        };
+        let status_str = if is_active_toolchain { " (active)" } else { "" };
 
         let mut t = t.lock();
 
@@ -1328,10 +1243,7 @@ async fn show_active_toolchain(cfg: &Cfg<'_>, verbose: bool) -> anyhow::Result<E
                     cfg.process.stdout().lock(),
                     "{} ({})",
                     toolchain.name(),
-                    match source {
-                        ActiveSource::Default => Cow::Borrowed("default"),
-                        _ => Cow::Owned(source.to_reason()),
-                    }
+                    source.to_reason()
                 )?;
             }
         }
@@ -1568,7 +1480,6 @@ async fn toolchain_link(
 }
 
 async fn toolchain_remove(cfg: &Cfg<'_>, opts: UninstallOpts) -> anyhow::Result<ExitCode> {
-    let default_toolchain = cfg.get_default().ok().flatten();
     let active_toolchain = cfg
         .maybe_ensure_active_toolchain(Some(false))
         .await
@@ -1584,15 +1495,7 @@ async fn toolchain_remove(cfg: &Cfg<'_>, opts: UninstallOpts) -> anyhow::Result<
             .is_some_and(|n| n == &toolchain_name)
         {
             warn!(
-                "removing the active toolchain; a toolchain override will be required for running Rust tools"
-            );
-        }
-        if default_toolchain
-            .as_ref()
-            .is_some_and(|n| n == &toolchain_name)
-        {
-            warn!(
-                "removing the default toolchain; proc-macros and build scripts might no longer build"
+                "removing the active toolchain; a toolchain will be required for running Rust tools"
             );
         }
 
@@ -1604,40 +1507,14 @@ async fn toolchain_remove(cfg: &Cfg<'_>, opts: UninstallOpts) -> anyhow::Result<
 fn pin_active_toolchain(qualified: bool, cfg: &Cfg<'_>) -> anyhow::Result<ExitCode> {
     let default_host = cfg.default_host_tuple()?;
 
-    let (mut r#override, backfill_components) = match cfg.find_override_config()? {
-        Some((o, _)) => (o, None),
-        None => {
-            let default = cfg
-                .get_default_resolvable()?
-                .context("no default toolchain to pin")?;
-            let components = match &default {
-                PartialToolchainName::Channel(desc) => {
-                    let tc = ChannelToolchain::new(cfg, desc.clone().complete(&default_host)?)?;
-                    let manifest = tc.get_manifest()?;
-
-                    Some(
-                        tc.components()?
-                            .into_iter()
-                            .filter_map(|c| {
-                                (c.available && c.installed)
-                                    .then(|| manifest.display_name(&c.component, &default_host))
-                            })
-                            .collect(),
-                    )
-                }
-                PartialToolchainName::Custom(_) => None,
-            };
-            (OverrideCfg::from(default), components)
-        }
+    let Some((mut r#override, _)) = cfg.find_override_config()? else {
+        anyhow::bail!("no toolchain is selected to pin");
     };
     if qualified {
         r#override.qualify(&default_host);
     }
 
-    let mut r#override = OverrideFile::from(r#override);
-    if backfill_components.is_some() {
-        r#override.toolchain.components = backfill_components;
-    }
+    let r#override = OverrideFile::from(r#override);
 
     let rel_path = "rust-toolchain.toml";
     let path = cfg.process.current_dir()?.join(rel_path);
