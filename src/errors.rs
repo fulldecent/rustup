@@ -23,7 +23,8 @@ use crate::{
     toolchain::{Toolchain, ToolchainName, ToolchainPath},
 };
 
-pub(crate) const DEFAULT_STABLE_HINT: &str = "help: run 'rustup default stable' to download the latest stable release of Rust and set it as your default toolchain.";
+pub(crate) const NO_TOOLCHAIN_HINT: &str =
+    "help: pass a +toolchain argument, or add a rust-toolchain.toml file.";
 
 #[derive(Debug, Clone)]
 pub enum TargetSuggestion {
@@ -320,8 +321,8 @@ pub enum RustupError {
     #[error("path '{0}' not found")]
     PathToolchainNotInstalled(ToolchainPath),
     #[error(
-        "rustup could not choose a version of {0} to run, because one wasn't specified explicitly, and no default is configured.\n{hint}",
-        hint = DEFAULT_STABLE_HINT
+        "rustup could not choose a version of {0} to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.\n{hint}",
+        hint = NO_TOOLCHAIN_HINT
     )]
     ToolchainNotSelected(String),
     #[error("{}", unknown_components_msg(.desc, .components))]

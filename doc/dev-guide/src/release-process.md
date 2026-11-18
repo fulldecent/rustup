@@ -1,14 +1,14 @@
 # Making a release
 
 In rustup, there are two possible release "modes": the beta release and the
-official release. The main difference between the two is that they use
-different values for the `RUSTUP_UPDATE_ROOT` environment variable:
+official release. The main difference between the two is the
+`RUSTUP_UPDATE_ROOT` value `rustup-init.sh` uses when it downloads the binary:
 
 - A beta release is deployed on `https://dev-static.rust-lang.org/rustup`.
 - An official release is deployed on `https://static.rust-lang.org/rustup`.
 
-By switching between those two values, rustup effectively provides two "self
-update channels", making beta testing possible with `rustup self update`.
+There is no `rustup self update` command. A new binary is installed by
+running `rustup-init` again.
 
 Currently, rustup does one beta release followed by one official release for
 each version number in the increasing order. In other words, we don't release

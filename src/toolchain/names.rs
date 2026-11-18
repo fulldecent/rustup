@@ -11,15 +11,11 @@
 //! `PartialToolchainName` represents a toolchain name from a user. Either a
 //! partial toolchain description or a single path component that is not 'none'.
 //!
-//! `MaybePartialToolchainName` is analogous to MaybeChannelToolchainName
-//! for both custom and official names.
-//!
 //! `ToolchainName` is the result of resolving `PartialToolchainName` with a
 //! host tuple, or parsing an installed toolchain name directly.
 //!
-//! `PartialToolchainNameOrPath` represents the values permittable in
-//! `RUSTUP_TOOLCHAIN`: resolved or not resolved official names, custom names,
-//! and absolute paths.
+//! `PartialToolchainNameOrPath` represents a `+toolchain` argument: resolved or
+//! not resolved official names, custom names, and absolute paths.
 //!
 //! `ToolchainNameOrPath` represents all the toolchain names that can make sense
 //! for referring to actually present toolchains. One of a `ToolchainName` or an
@@ -54,7 +50,7 @@ use thiserror::Error;
 use unicode_security::GeneralSecurityProfile;
 
 use crate::{
-    config::{Cfg, no_toolchain_error},
+    config::Cfg,
     dist::{ChannelToolchainName, PartialChannelToolchainName, TargetTuple},
     errors::RustupError,
     utils::raw::open_dir_following_links,
@@ -84,7 +80,7 @@ pub enum InvalidName {
 /// An alias for a toolchain name.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ToolchainAlias {
-    /// Refers to rustup's configured default toolchain
+    /// The word `default`. Resolution rejects it, so it is not a custom toolchain name.
     Default,
 }
 
@@ -144,13 +140,10 @@ impl<T> Override<T>
 where
     T: From<PartialToolchainName>,
 {
-    pub(crate) fn resolve(self, cfg: &Cfg<'_>) -> anyhow::Result<T> {
+    pub(crate) fn resolve(self, _cfg: &Cfg<'_>) -> anyhow::Result<T> {
         match self {
             Self::Aliased(ToolchainAlias::Default) => {
-                let default = cfg
-                    .get_default_resolvable()?
-                    .ok_or_else(|| no_toolchain_error(cfg.process))?;
-                Ok(T::from(default))
+                anyhow::bail!("'default' is not a toolchain name");
             }
             Self::Explicit(value) => Ok(value),
         }
@@ -204,43 +197,6 @@ impl Display for PartialToolchainName {
             Self::Custom(c) => write!(f, "{c}"),
             Self::Channel(o) => write!(f, "{o}"),
         }
-    }
-}
-
-/// A toolchain name from user input. MaybeToolchainName accepts 'none' or a
-/// custom or resolvable official name. Possibly this should be an Option with a
-/// local trait for our needs.
-#[derive(Debug, Clone)]
-pub(crate) enum MaybePartialToolchainName {
-    Some(PartialToolchainName),
-    None,
-}
-
-impl FromStr for MaybePartialToolchainName {
-    type Err = InvalidName;
-
-    // If value could be resolved, return a ready to resolve version of it.
-    // Otherwise error.
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Ok(match normalize_name(value)? {
-            "none" => Self::None,
-            candidate => Self::Some(PartialToolchainName::from_str(candidate)?),
-        })
-    }
-}
-
-impl Display for MaybePartialToolchainName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Some(t) => write!(f, "{t}"),
-            Self::None => write!(f, "none"),
-        }
-    }
-}
-
-impl From<PartialToolchainName> for MaybePartialToolchainName {
-    fn from(value: PartialToolchainName) -> Self {
-        Self::Some(value)
     }
 }
 
@@ -324,9 +280,8 @@ impl Display for ToolchainName {
     }
 }
 
-/// PartialToolchainNameOrPath is used to process values set in
-/// RUSTUP_TOOLCHAIN: resolvable and resolved official names, custom names and
-/// absolute paths.
+/// A `+toolchain` argument: resolvable and resolved official names, custom
+/// names, and absolute paths.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub(crate) enum PartialToolchainNameOrPath {
     Named(PartialToolchainName),
@@ -392,9 +347,8 @@ impl From<PartialToolchainName> for PartialToolchainNameOrPath {
 
 /// ToolchainNameOrPath can be used in calls to Cfg that alter configuration,
 /// like setting overrides, or that depend on configuration, like calculating
-/// the toolchain directory. It is not used to model the RUSTUP_TOOLCHAIN
-/// variable, because that can take unresolved toolchain values that are not
-/// invalid for referring to an installed toolchain.
+/// the toolchain directory. A `+toolchain` argument can still name a toolchain
+/// that is not installed yet, so that form uses `PartialToolchainNameOrPath`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ToolchainNameOrPath {
     Named(ToolchainName),

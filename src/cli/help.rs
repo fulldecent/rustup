@@ -15,7 +15,7 @@ pub(crate) fn rustup_help() -> String {
 
 {HEADER}Common commands:{HEADER:#}
 
-  Update Rust toolchains and rustup
+  Update installed Rust toolchains
 
     {LITERAL}$ rustup update{LITERAL:#}
     
@@ -29,13 +29,14 @@ pub(crate) fn rustup_help() -> String {
 pub(crate) fn show_help() -> String {
     format!(
         r"{HEADER}Discussion:{HEADER:#}
-  Shows the name of the active toolchain and the version of `rustc`.
+  Prints the toolchain selected for the current directory.
 
-  If the active toolchain has installed support for additional
-  compilation targets, then they are listed as well.
+  The toolchain is the +toolchain argument on this command, if one
+  was given. Otherwise it is the nearest rust-toolchain.toml, found
+  by walking from the current directory toward the filesystem root.
+  If neither is present, the command exits with an error.
 
-  If there are multiple toolchains installed then all installed
-  toolchains are listed as well."
+  `rustup resolve` is another name for this command."
     )
 }
 
@@ -56,8 +57,7 @@ pub(crate) fn update_help() -> String {
     format!(
         r"{HEADER}Discussion:{HEADER:#}
   With no toolchain specified, the `update` command updates each of
-  the installed toolchains from the official release channels, then
-  updates rustup itself.
+  the installed toolchains from the official release channels.
 
   If given a toolchain argument then `update` updates that
   toolchain, the same as `rustup toolchain install`.
@@ -70,14 +70,6 @@ pub(crate) fn install_help() -> String {
     format!(
         r"{HEADER}Discussion:{HEADER:#}
   The 'install' command is an alias for 'rustup toolchain install'."
-    )
-}
-
-pub(crate) fn default_help() -> String {
-    format!(
-        r"{HEADER}Discussion:{HEADER:#}
-  Sets the default toolchain to the one specified. If the toolchain
-  is not already installed then it is installed first."
     )
 }
 
@@ -118,11 +110,6 @@ pub(crate) fn toolchain_help() -> String {
 
     {LITERAL}$ rustup toolchain install stable-msvc{LITERAL:#}
 
-  The `rustup default` command may be used to both install and set
-  the desired toolchain as default in a single command:
-
-    {LITERAL}$ rustup default stable-msvc{LITERAL:#}
-
   rustup can also manage symlinked local toolchain builds, which are
   often used for developing Rust itself. For more information see
   `rustup toolchain help link`."
@@ -154,65 +141,35 @@ pub(crate) fn toolchain_link_help() -> String {
   compiler versions as follows:
 
     {LITERAL}$ rustup toolchain link latest-stage1 build/x86_64-unknown-linux-gnu/stage1{LITERAL:#}
-    {LITERAL}$ rustup override set latest-stage1{LITERAL:#}
+
+  Then name that toolchain in `rust-toolchain.toml`:
+
+    {LITERAL}[toolchain]{LITERAL:#}
+    {LITERAL}channel = 'latest-stage1'{LITERAL:#}
 
   If you now compile a crate in the current directory, the custom
   toolchain 'latest-stage1' will be used."
     )
 }
 
-pub(crate) fn override_help() -> String {
-    format!(
-        r"{HEADER}Discussion:{HEADER:#}
-  Overrides configure Rustup to use a specific toolchain when
-  running in a specific directory.
-
-  Directories can be assigned their own Rust toolchain with `rustup
-  override`. When a directory has an override then any time `rustc`
-  or `cargo` is run inside that directory, or one of its child
-  directories, the override toolchain will be invoked.
-
-  To pin to a specific nightly:
-
-    {LITERAL}$ rustup override set nightly-2014-12-18{LITERAL:#}
-
-  Or a specific stable release:
-
-    {LITERAL}$ rustup override set 1.0.0{LITERAL:#}
-
-  To see the active toolchain use `rustup show`. To remove the
-  override and use the default toolchain again, `rustup override
-  unset`."
-    )
-}
-
-pub(crate) fn override_unset_help() -> String {
-    format!(
-        r"{HEADER}Discussion:{HEADER:#}
-  If `--path` argument is present, removes the override toolchain
-  for the specified directory. If `--nonexistent` argument is
-  present, removes the override toolchain for all nonexistent
-  directories. Otherwise, removes the override toolchain for the
-  current directory."
-    )
-}
-
 pub(crate) fn run_help() -> String {
     format!(
         r"{HEADER}Discussion:{HEADER:#}
-  Configures an environment to use the given toolchain and then runs
-  the specified program. The command may be any program, not just
-  rustc or cargo. This can be used for testing arbitrary toolchains
-  without setting an override.
+  Runs the given program with the toolchain's bin directory and
+  library path set. The command may be any program, not just rustc
+  or cargo.
 
-  Commands explicitly proxied by `rustup` (such as `rustc` and
-  `cargo`) also have a shorthand for this available. The toolchain
-  can be set by using `+toolchain` as the first argument. These are
-  equivalent:
+  The first argument is a toolchain when it is a channel name, an
+  absolute path, or the name of an installed custom toolchain. That
+  toolchain is installed when it is missing. Otherwise every argument
+  is the command, and the toolchain is resolved the same way as
+  `rustup show`: a +toolchain argument, then rust-toolchain.toml, and
+  an error when neither is present. A toolchain resolved from the
+  file is installed when it is missing.
 
-    {LITERAL}$ cargo +nightly build{LITERAL:#}
+    {LITERAL}$ rustup run nightly cargo build{LITERAL:#}
 
-    {LITERAL}$ rustup run --install nightly cargo build{LITERAL:#}"
+    {LITERAL}$ rustup run cargo build{LITERAL:#}"
     )
 }
 
@@ -373,22 +330,11 @@ pub(crate) fn official_toolchain_arg_help() -> &'static str {
                                        or '1.8.0'. For more information see `rustup \
                                        help toolchain`"
 }
-pub(crate) fn resolvable_local_toolchain_arg_help() -> &'static str {
-    "Toolchain name, such as 'stable', 'nightly', \
-                                       '1.8.0', or a custom toolchain name, or an absolute path. For more \
-                                       information see `rustup help toolchain`"
-}
 pub(crate) fn resolvable_toolchain_arg_help() -> &'static str {
     "Toolchain name, such as 'stable', 'nightly', \
                                        '1.8.0', or a custom toolchain name. For more information see `rustup \
                                        help toolchain`"
 }
-pub(crate) fn maybe_resolvable_toolchain_arg_help() -> &'static str {
-    "'none', a toolchain name, such as 'stable', 'nightly', \
-                                       '1.8.0', or a custom toolchain name. For more information see `rustup \
-                                       help toolchain`"
-}
-
 pub(crate) fn topic_arg_help() -> &'static str {
     "Topic such as 'core', 'fn', 'usize', 'eprintln!', \
                                    'core::arch', 'alloc::format!', 'std::fs', \

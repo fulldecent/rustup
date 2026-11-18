@@ -9,11 +9,6 @@
   root `rustup` folder, used for storing installed toolchains and
   configuration options.
 
-- `RUSTUP_TOOLCHAIN` (default: none). If set, will [override] the toolchain used
-  for all rust tool invocations. A toolchain with this name should be installed,
-  or invocations will fail. This can specify custom toolchains, installable
-  toolchains, or the absolute path to a toolchain.
-
 - `RUSTUP_DIST_SERVER` (default: `https://static.rust-lang.org`). Sets the root
   URL for downloading static resources related to Rust. You can change this to
   instead use a local mirror, or to test the binaries from the staging
@@ -23,10 +18,11 @@
   Use `RUSTUP_DIST_SERVER` instead.
 
 - `RUSTUP_UPDATE_ROOT` (default `https://static.rust-lang.org/rustup`). Sets
-  the root URL for downloading self-update.
+  the root URL `rustup-init.sh` uses when downloading the rustup binary.
+  The installed `rustup` command does not read this variable.
 
 - `RUSTUP_VERSION` (default: none). Overrides the rustup version (e.g. `1.27.1`)
-  to be downloaded when executing `rustup-init.sh` or `rustup self update`.
+  `rustup-init.sh` downloads. The installed `rustup` command does not read this variable.
 
 - `RUSTUP_IO_THREADS` _unstable_ (default: reported cpu count, max 8). Sets the
   number of threads to perform close IO in. Set to `1` to force
@@ -57,9 +53,7 @@
   toolchain when it is absent. Set this value to `0` to disable automatic
   installation.
 
-- `RUSTUP_HARDLINK_PROXIES` _unstable_. When set, rustup will not attempt to
-  symlink proxies and instead always use hardlinks. If you find this fixes
-  a problem, then please report the issue on the [rustup issue tracker].
+- `RUSTUP_HARDLINK_PROXIES` _unstable_. Ignored. The installer does not create shims.
 
 - `RUSTUP_TERM_PROGRESS_WHEN` (default: `auto`). Controls whether progress bars are shown or not.
   Set to `always` to always enable progress bars, and to `never` to disable them.
@@ -72,10 +66,9 @@
 - `RUSTUP_CONCURRENT_DOWNLOADS` _unstable_ (default: 2). Controls the number of
   downloads made concurrently.
 
-- `RUSTUP_TOOLCHAIN_SOURCE` _unstable_. Set by rustup to tell proxied tools how `RUSTUP_TOOLCHAIN` was determined. Non-rustup tools should not set this environment variable, except insofar as to mirror an earlier invocation from rustup.
+- `RUSTUP_TOOLCHAIN_SOURCE` _unstable_. Set by rustup to tell the child how the toolchain was selected (`cli` or `toolchain-file`). Non-rustup tools should not set this environment variable.
 
 [directive syntax]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
 [dc]: https://docs.docker.com/storage/storagedriver/overlayfs-driver/#modifying-files-or-directories
-[override]: overrides.md
 [tracing viewer]: https://github.com/catapult-project/catapult/blob/master/tracing/README.md
 [rustup issue tracker]: https://github.com/rust-lang/rustup/issues

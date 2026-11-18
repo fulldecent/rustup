@@ -1,9 +1,8 @@
 use std::{
-    borrow::Cow,
     env::consts::EXE_SUFFIX,
-    fmt,
+    fmt, fs,
     io::{self, Write},
-    path::{self, Path, PathBuf},
+    path::{Path, PathBuf},
     process::ExitStatus,
     str::FromStr,
     sync::Arc,
@@ -12,12 +11,12 @@ use std::{
 
 use anstream::ColorChoice;
 use anstyle::Style;
-use anyhow::{Context as _, Error, anyhow};
+use anyhow::{Context as _, Error, anyhow, bail};
 use clap::{
     Args, CommandFactory, Parser, Subcommand, ValueEnum,
     builder::{PossibleValue, ValueHint},
 };
-use clap_cargo::style::{CONTEXT, ERROR, GOOD, HEADER, TRANSIENT, WARN};
+use clap_cargo::style::{ERROR, GOOD, TRANSIENT, WARN};
 use clap_complete::Shell;
 use futures_util::stream::StreamExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -30,31 +29,27 @@ use crate::{
     cli::{
         common::{self, PackageUpdate, report_error, update_console_filter},
         completions, docs,
-        errors::CliError,
         help::{
-            check_help, completions_help, default_help, doc_help, install_help,
-            maybe_resolvable_toolchain_arg_help, official_toolchain_arg_help, override_help,
-            override_unset_help, resolvable_local_toolchain_arg_help,
+            check_help, completions_help, doc_help, install_help, official_toolchain_arg_help,
             resolvable_toolchain_arg_help, run_help, rustup_help, show_active_toolchain_help,
             show_help, toolchain_help, toolchain_install_help, toolchain_link_help, topic_arg_help,
             update_help,
         },
-        self_update::{self, SelfUpdateMode, check_rustup_update},
+        self_update,
     },
     command, component_for_bin,
-    config::{ActiveSource, Cfg, OverrideCfg, OverrideFile},
+    config::{ActiveSource, Cfg, OverrideFile, no_toolchain_error},
     dist::{
         DistOptions, PartialChannelToolchainName, Profile, Switch, TargetTuple,
         download::DownloadCfg,
         manifest::{Component, ManifestWithHash},
     },
-    errors::{DEFAULT_STABLE_HINT, RustupError},
+    errors::RustupError,
     install::{InstallMethod, UpdateStatus},
-    process::{ColorableTerminal, Process},
+    process::Process,
     toolchain::{
-        ChannelToolchain, CustomToolchainName, MaybePartialToolchainName, Override,
-        PartialToolchainName, PartialToolchainNameOrPath, Toolchain, ToolchainName,
-        ToolchainNameOrPath,
+        ChannelToolchain, CustomToolchainName, Override, PartialToolchainName,
+        PartialToolchainNameOrPath, Toolchain, ToolchainNameExt, ToolchainNameOrPath,
     },
     utils::{self, ExitCode},
 };
@@ -152,29 +147,14 @@ enum RustupSubcmd {
         subcmd: ToolchainSubcmd,
     },
 
-    /// Set the default toolchain
-    #[command(after_help = default_help())]
-    Default {
-        #[arg(help = maybe_resolvable_toolchain_arg_help())]
-        toolchain: Option<Override<MaybePartialToolchainName>>,
-
-        /// Install toolchains that require an emulator. See https://github.com/rust-lang/rustup/wiki/Non-host-toolchains
-        #[arg(long)]
-        force_non_host: bool,
-    },
-
-    /// Show the active and installed toolchains or profiles
-    #[command(after_help = show_help())]
+    /// Print the toolchain selected for the current directory
+    #[command(alias = "resolve", after_help = show_help())]
     Show {
-        /// Enable verbose output with rustc information for all installed toolchains
-        #[arg(short, long)]
-        verbose: bool,
-
         #[command(subcommand)]
         subcmd: Option<ShowSubcmd>,
     },
 
-    /// Update Rust toolchains and rustup
+    /// Update Rust toolchains
     #[command(
         after_help = update_help(),
         aliases = ["upgrade", "up"],
@@ -183,10 +163,6 @@ enum RustupSubcmd {
         /// Toolchain name, such as 'stable', 'nightly', or '1.8.0'. For more information see `rustup help toolchain`
         #[arg(num_args = 1.., value_parser = update_toolchain_value_parser)]
         toolchain: Vec<PartialChannelToolchainName>,
-
-        /// Don't perform self update when running the `rustup update` command
-        #[arg(long)]
-        no_self_update: bool,
 
         /// Allow downgrading the toolchain
         #[arg(long)]
@@ -205,12 +181,9 @@ enum RustupSubcmd {
         check: bool,
     },
 
-    /// Check for updates to Rust toolchains and rustup
+    /// Check for updates to Rust toolchains
     #[command(after_help = check_help())]
-    Check {
-        #[command(flatten)]
-        opts: CheckOpts,
-    },
+    Check,
 
     /// Modify a toolchain's supported targets
     Target {
@@ -224,24 +197,12 @@ enum RustupSubcmd {
         subcmd: ComponentSubcmd,
     },
 
-    /// Modify toolchain overrides for directories
-    Override {
-        #[command(subcommand)]
-        subcmd: OverrideSubcmd,
-    },
-
-    /// Run a command with an environment configured for a given toolchain
+    /// Run a command under a toolchain
     #[command(after_help = run_help(), trailing_var_arg = true)]
     Run {
-        #[arg(help = resolvable_local_toolchain_arg_help())]
-        toolchain: PartialToolchainNameOrPath,
-
-        #[arg(required = true, num_args = 1..)]
-        command: Vec<String>,
-
-        /// Install the requested toolchain if needed
-        #[arg(long)]
-        install: bool,
+        /// Toolchain name and command, or a command resolved from rust-toolchain.toml
+        #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
 
     /// Display which binary will be run for a given command
@@ -309,11 +270,7 @@ enum RustupSubcmd {
 }
 
 fn update_toolchain_value_parser(s: &str) -> anyhow::Result<PartialChannelToolchainName> {
-    PartialChannelToolchainName::from_str(s).inspect_err(|_| {
-        if s == "self" {
-            info!("if you meant to update rustup itself, use `rustup self update`");
-        }
-    })
+    PartialChannelToolchainName::from_str(s)
 }
 
 impl RustupSubcmd {
@@ -330,10 +287,8 @@ impl RustupSubcmd {
             Self::Check { .. }
             | Self::Completions { .. }
             | Self::Component { .. }
-            | Self::Default { .. }
             | Self::DumpTestament
             | Self::Install { .. }
-            | Self::Override { .. }
             | Self::Self_ { .. }
             | Self::Set { .. }
             | Self::Show { .. }
@@ -345,7 +300,7 @@ impl RustupSubcmd {
         }
     }
 
-    /// Returns whether rustup should warn about having no default toolchain and no installed toolchains.
+    /// Returns whether rustup should warn about having no installed toolchains.
     fn should_warn_empty_setup(&self) -> bool {
         match self {
             // These subcommands are not about toolchains, so the hint would be noise.
@@ -355,10 +310,8 @@ impl RustupSubcmd {
             // the command has completed.
             Self::Check { .. }
             | Self::Component { .. }
-            | Self::Default { .. }
             | Self::Doc { .. }
             | Self::Install { .. }
-            | Self::Override { .. }
             | Self::Run { .. }
             | Self::Set { .. }
             | Self::Show { .. }
@@ -433,19 +386,18 @@ enum ToolchainSubcmd {
         path: PathBuf,
     },
 
+    /// Remove a linked custom toolchain name
+    Unlink {
+        /// Custom toolchain name
+        toolchain: CustomToolchainName,
+    },
+
     /// Write the active toolchain as an override file
     Pin {
         /// Write the toolchain name with host tuple
         #[arg(long)]
         qualified: bool,
     },
-}
-
-#[derive(Debug, Default, Args)]
-struct CheckOpts {
-    /// Don't check for self update when running the `rustup check` command
-    #[arg(long)]
-    no_self_update: bool,
 }
 
 #[derive(Debug, Default, Args)]
@@ -467,10 +419,6 @@ struct UpdateOpts {
     #[arg(short, long, value_delimiter = ',')]
     target: Vec<String>,
 
-    /// Don't perform self update when running the `rustup toolchain install` command
-    #[arg(long)]
-    no_self_update: bool,
-
     /// Don't try to update the installed toolchain
     #[arg(long)]
     no_update: bool,
@@ -486,14 +434,6 @@ struct UpdateOpts {
     /// Install toolchains that require an emulator. See https://github.com/rust-lang/rustup/wiki/Non-host-toolchains
     #[arg(long)]
     force_non_host: bool,
-
-    /// Set the installed toolchain as the override for the current directory
-    #[arg(long)]
-    r#override: bool,
-
-    /// Set the installed toolchain as the default toolchain
-    #[arg(long)]
-    default: bool,
 
     /// Indicate update status via exit code
     #[arg(long)]
@@ -598,49 +538,11 @@ enum ComponentSubcmd {
 
 #[derive(Debug, Subcommand)]
 #[command(
-    after_help = override_help(),
-    arg_required_else_help = true,
-    subcommand_required = true,
-)]
-enum OverrideSubcmd {
-    /// List directory toolchain overrides
-    List,
-
-    /// Set the override toolchain for a directory
-    #[command(alias = "add")]
-    Set {
-        #[arg(help = resolvable_toolchain_arg_help())]
-        toolchain: Override<PartialToolchainName>,
-
-        /// Path to the directory
-        #[arg(long)]
-        path: Option<PathBuf>,
-    },
-
-    /// Remove the override toolchain for a directory
-    #[command(aliases = ["remove", "rm", "delete", "del"], after_help = override_unset_help())]
-    Unset {
-        /// Path to the directory
-        #[arg(long)]
-        path: Option<PathBuf>,
-
-        /// Remove override toolchain for all nonexistent directories
-        #[arg(long)]
-        nonexistent: bool,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-#[command(
     name = "self",
     arg_required_else_help = true,
     subcommand_required = true
 )]
 enum SelfSubcmd {
-    /// Download and install updates to rustup
-    #[command(alias = "up")]
-    Update,
-
     /// Uninstall rustup
     Uninstall {
         /// Disable confirmation prompt
@@ -668,12 +570,6 @@ enum SetSubcmd {
         profile_name: Profile,
     },
 
-    /// The rustup auto self update mode
-    AutoSelfUpdate {
-        #[arg(value_enum, default_value_t)]
-        auto_self_update_mode: SelfUpdateMode,
-    },
-
     /// The auto toolchain install mode
     AutoInstall {
         #[arg(value_enum, default_value_t)]
@@ -698,8 +594,6 @@ pub async fn main(
         .var("RUSTUP_COMPLETE")
         .bin("rustup")
         .complete();
-
-    self_update::cleanup_self_updater(process, &process.cargo_home()?.join("bin"))?;
 
     use clap::error::ErrorKind::*;
     let matches = match Rustup::try_parse_from(process.args_os()) {
@@ -753,8 +647,8 @@ pub async fn main(
         RustupSubcmd::DumpTestament => common::dump_testament(process),
         RustupSubcmd::Install { opts } => update(cfg, opts, true).await,
         RustupSubcmd::Uninstall { opts } => toolchain_remove(cfg, opts).await,
-        RustupSubcmd::Show { verbose, subcmd } => handle_epipe(match subcmd {
-            None => show(cfg, verbose).await,
+        RustupSubcmd::Show { subcmd } => handle_epipe(match subcmd {
+            None => show(cfg),
             Some(ShowSubcmd::ActiveToolchain { verbose }) => {
                 show_active_toolchain(cfg, verbose).await
             }
@@ -766,7 +660,6 @@ pub async fn main(
         }),
         RustupSubcmd::Update {
             toolchain,
-            no_self_update,
             allow_downgrade,
             force,
             force_non_host,
@@ -776,7 +669,6 @@ pub async fn main(
                 cfg,
                 UpdateOpts {
                     toolchain,
-                    no_self_update,
                     allow_downgrade,
                     force,
                     force_non_host,
@@ -795,14 +687,11 @@ pub async fn main(
             ToolchainSubcmd::Link { toolchain, path } => {
                 toolchain_link(cfg, &toolchain, &path).await
             }
+            ToolchainSubcmd::Unlink { toolchain } => toolchain_unlink(cfg, &toolchain),
             ToolchainSubcmd::Uninstall { opts } => toolchain_remove(cfg, opts).await,
             ToolchainSubcmd::Pin { qualified } => pin_active_toolchain(qualified, cfg),
         },
-        RustupSubcmd::Check { opts } => check_updates(cfg, opts).await,
-        RustupSubcmd::Default {
-            toolchain,
-            force_non_host,
-        } => default_(cfg, toolchain, force_non_host).await,
+        RustupSubcmd::Check => check_updates(cfg).await,
         RustupSubcmd::Target { subcmd } => match subcmd {
             TargetSubcmd::List {
                 toolchain,
@@ -831,22 +720,7 @@ pub async fn main(
                 target,
             } => component_remove(cfg, component, toolchain, target).await,
         },
-        RustupSubcmd::Override { subcmd } => match subcmd {
-            OverrideSubcmd::List => handle_epipe(common::list_overrides(cfg)),
-            OverrideSubcmd::Set { toolchain, path } => {
-                override_add(cfg, toolchain, path.as_deref()).await
-            }
-            OverrideSubcmd::Unset { path, nonexistent } => {
-                override_remove(cfg, path.as_deref(), nonexistent)
-            }
-        },
-        RustupSubcmd::Run {
-            toolchain,
-            command,
-            install,
-        } => run(cfg, toolchain, command, install)
-            .await
-            .map(ExitCode::from),
+        RustupSubcmd::Run { args } => run(cfg, args).await.map(ExitCode::from),
         RustupSubcmd::Which { command, toolchain } => which(cfg, &command, toolchain).await,
         RustupSubcmd::Doc {
             path,
@@ -858,7 +732,6 @@ pub async fn main(
         #[cfg(not(windows))]
         RustupSubcmd::Man { command, toolchain } => docs::man(cfg, &command, toolchain).await,
         RustupSubcmd::Self_ { subcmd } => match subcmd {
-            SelfSubcmd::Update => self_update::update(cfg).await,
             SelfSubcmd::Uninstall {
                 no_prompt,
                 no_modify_path,
@@ -872,9 +745,6 @@ pub async fn main(
             SetSubcmd::Profile { profile_name } => {
                 cfg.set_profile(profile_name).map(|_| ExitCode::SUCCESS)
             }
-            SetSubcmd::AutoSelfUpdate {
-                auto_self_update_mode,
-            } => set_auto_self_update(cfg, auto_self_update_mode),
             SetSubcmd::AutoInstall { auto_install_mode } => cfg
                 .set_auto_install(auto_install_mode)
                 .map(|_| ExitCode::SUCCESS),
@@ -887,8 +757,10 @@ pub async fn main(
         }
     }?;
 
-    if should_warn && cfg.list_toolchains(true)?.is_empty() && cfg.get_default()?.is_none() {
-        warn!("no toolchain installed and no default toolchain set\n{DEFAULT_STABLE_HINT}");
+    if should_warn && cfg.list_toolchains(true)?.is_empty() {
+        warn!(
+            "no toolchain installed\nhelp: run 'rustup toolchain install stable' to download the latest stable release of Rust, then name it in rust-toolchain.toml"
+        );
     }
 
     if should_notify && let Err(e) = cfg.notify_release() {
@@ -898,56 +770,7 @@ pub async fn main(
     Ok(exit_code)
 }
 
-async fn default_(
-    cfg: &Cfg<'_>,
-    toolchain: Option<Override<MaybePartialToolchainName>>,
-    force_non_host: bool,
-) -> anyhow::Result<ExitCode> {
-    common::warn_if_host_is_emulated(cfg.process);
-
-    if let Some(toolchain) = toolchain {
-        match toolchain.resolve(cfg)? {
-            MaybePartialToolchainName::None => {
-                cfg.set_default(None)?;
-            }
-            MaybePartialToolchainName::Some(PartialToolchainName::Custom(toolchain_name)) => {
-                Toolchain::new(cfg, toolchain_name.clone().into())?;
-                cfg.set_default(Some(&toolchain_name.into()))?;
-            }
-            MaybePartialToolchainName::Some(PartialToolchainName::Channel(toolchain)) => {
-                let desc = toolchain.clone().complete(&cfg.default_host_tuple()?)?;
-                let status = cfg
-                    .ensure_installed(&desc, vec![], vec![], None, force_non_host, true)
-                    .await?
-                    .status;
-
-                cfg.set_default(Some(&toolchain.into()))?;
-
-                writeln!(cfg.process.stdout().lock())?;
-
-                common::show_channel_update(cfg, PackageUpdate::Toolchain(desc), Ok(status))?;
-            }
-        };
-
-        if let Some((toolchain, source)) = cfg.active_toolchain()?
-            && !matches!(source, ActiveSource::Default)
-        {
-            info!(
-                "note that the toolchain '{toolchain}' is currently in use ({})",
-                source.to_reason()
-            );
-        }
-    } else {
-        let default_toolchain = cfg
-            .get_default()?
-            .ok_or_else(|| anyhow!("no default toolchain is configured"))?;
-        writeln!(cfg.process.stdout().lock(), "{default_toolchain} (default)")?;
-    }
-
-    Ok(ExitCode::SUCCESS)
-}
-
-async fn check_updates(cfg: &Cfg<'_>, opts: CheckOpts) -> anyhow::Result<ExitCode> {
+async fn check_updates(cfg: &Cfg<'_>) -> anyhow::Result<ExitCode> {
     let t = cfg.process.stdout();
     let use_colors = matches!(t.color_choice(), ColorChoice::Auto | ColorChoice::Always);
     let mut update_available = false;
@@ -1063,22 +886,6 @@ async fn check_updates(cfg: &Cfg<'_>, opts: CheckOpts) -> anyhow::Result<ExitCod
         }
     }
 
-    let self_update_mode = SelfUpdateMode::from_cfg(cfg)?;
-    // Priority: no-self-update feature > self_update_mode > no-self-update args.
-    // Check for update only if rustup does **not** have the no-self-update feature,
-    // and auto-self-update is configured to **enable** or **check-only**
-    // and has **no** no-self-update parameter.
-    let self_update = !cfg!(feature = "no-self-update")
-        && matches!(
-            self_update_mode,
-            SelfUpdateMode::Enable | SelfUpdateMode::CheckOnly
-        )
-        && !opts.no_self_update;
-
-    if self_update && check_rustup_update(&DownloadCfg::new(cfg)).await? {
-        update_available = true;
-    }
-
     Ok(if update_available {
         ExitCode::UPDATES_AVAILABLE
     } else {
@@ -1094,8 +901,6 @@ async fn update(
     let mut exit_code = ExitCode::SUCCESS;
 
     common::warn_if_host_is_emulated(cfg.process);
-    let self_update_mode = SelfUpdateMode::from_cfg(cfg)?;
-    let should_self_update = !opts.no_self_update;
     let force_non_host = opts.force_non_host;
     cfg.profile_override = opts.profile;
 
@@ -1104,7 +909,6 @@ async fn update(
         warn!("{}", common::WARN_COMPLETE_PROFILE);
     }
 
-    let dl_cfg = DownloadCfg::new(cfg);
     let names = opts.toolchain;
     if !names.is_empty() {
         for name in names {
@@ -1152,45 +956,82 @@ async fn update(
             common::show_channel_update(
                 cfg,
                 PackageUpdate::Toolchain(desc.clone()),
-                Ok(status.clone()),
+                Ok(status),
             )?;
-
-            if opts.r#override {
-                cfg.make_override(&cfg.current_dir, &name)?;
-            }
-
-            if opts.default
-                || (cfg.get_default()?.is_none() && matches!(status, UpdateStatus::Installed))
-            {
-                cfg.set_default(Some(&name.into()))?;
-            }
         }
-        exit_code &= self_update_mode.update(should_self_update, &dl_cfg).await?;
     } else if ensure_active_toolchain {
         let (toolchain, source) = cfg.ensure_active_toolchain(force_non_host, true).await?;
         info!("the active toolchain `{}` has been installed", *toolchain);
         info!("it's active because: {}", source.to_reason());
-        exit_code &= self_update_mode.update(should_self_update, &dl_cfg).await?;
     } else {
         exit_code &= common::update_all_channels(cfg, opts.force, opts.check).await?;
-        exit_code &= self_update_mode.update(should_self_update, &dl_cfg).await?;
 
         info!("cleaning up downloads & tmp directories");
         utils::delete_dir_contents_following_links(&cfg.download_dir);
-        dl_cfg.tmp_cx.clean();
+        DownloadCfg::new(cfg).tmp_cx.clean();
     }
 
     Ok(exit_code)
 }
 
-async fn run(
+fn split_run_args(
     cfg: &Cfg<'_>,
-    toolchain: PartialToolchainNameOrPath,
-    command: Vec<String>,
-    install: bool,
-) -> anyhow::Result<ExitStatus> {
-    let toolchain = toolchain.complete(&cfg.default_host_tuple()?)?;
-    let toolchain = Toolchain::from_local(toolchain, install, cfg).await?;
+    args: &[String],
+) -> anyhow::Result<(Option<PartialToolchainNameOrPath>, Vec<String>)> {
+    let Some((first, rest)) = args.split_first() else {
+        bail!("rustup run requires a command");
+    };
+
+    // A leading +name, -name, or path is an explicit toolchain argument.
+    // An uninstalled custom name is the command, so `rustup run cargo build`
+    // resolves from rust-toolchain.toml instead of looking up a toolchain
+    // called cargo.
+    if first.starts_with(['+', '-']) || first.contains(['/', '\\']) {
+        let toolchain = PartialToolchainNameOrPath::from_str(first)?;
+        if rest.is_empty() {
+            bail!("rustup run requires a command");
+        }
+        return Ok((Some(toolchain), rest.to_vec()));
+    }
+
+    if let Ok(parsed) = PartialToolchainNameOrPath::from_str(first) {
+        let explicit = match parsed {
+            PartialToolchainNameOrPath::Path(_) => true,
+            PartialToolchainNameOrPath::Named(PartialToolchainName::Channel(_)) => true,
+            PartialToolchainNameOrPath::Named(PartialToolchainName::Custom(ref custom)) => {
+                ToolchainNameOrPath::from(custom.clone())
+                    .path(cfg)
+                    .symlink_metadata()
+                    .is_ok()
+            }
+        };
+        if explicit {
+            if rest.is_empty() {
+                bail!("rustup run requires a command");
+            }
+            return Ok((
+                Some(PartialToolchainNameOrPath::from_str(first)?),
+                rest.to_vec(),
+            ));
+        }
+    }
+
+    Ok((None, args.to_vec()))
+}
+
+async fn run(cfg: &Cfg<'_>, args: Vec<String>) -> anyhow::Result<ExitStatus> {
+    let (toolchain, command) = split_run_args(cfg, &args)?;
+    let toolchain = match toolchain {
+        Some(toolchain) => {
+            let toolchain = toolchain.complete(&cfg.default_host_tuple()?)?;
+            Toolchain::from_local(toolchain, true, cfg).await?.inner
+        }
+        None => {
+            let (name, source) = cfg.ensure_active_toolchain(false, false).await?;
+            name.warn_auto_install(cfg.process);
+            Toolchain::with_source(cfg, name.inner, &source)?
+        }
+    };
     let cmd = toolchain.command(&command[0])?;
     command::run_command_for_dir(cmd, &command[0], &command[1..])
 }
@@ -1233,138 +1074,11 @@ async fn which(
     ))
 }
 
-#[tracing::instrument(level = "trace", skip_all)]
-async fn show(cfg: &Cfg<'_>, verbose: bool) -> anyhow::Result<ExitCode> {
-    common::warn_if_host_is_emulated(cfg.process);
-
-    let t = cfg.process.stdout();
-
-    // Print host tuple
-    writeln!(
-        t.lock(),
-        "{HEADER}Default host: {HEADER:#}{}",
-        cfg.default_host_tuple()?
-    )?;
-
-    // Print rustup home directory
-    {
-        let mut t = t.lock();
-        writeln!(
-            t,
-            "{HEADER}rustup home:  {HEADER:#}{}",
-            cfg.rustup_dir.display()
-        )?;
-        writeln!(t)?;
-    }
-
-    let mut installed_toolchains = cfg.list_toolchains(cfg.quiet)?;
-    installed_toolchains.sort();
-    let active_toolchain_and_source: Option<(ToolchainName, ActiveSource)> =
-        if let Ok(Some((ToolchainNameOrPath::Named(toolchain_name), source))) =
-            cfg.maybe_ensure_active_toolchain(None).await
-        {
-            Some((toolchain_name, source))
-        } else {
-            None
-        };
-
-    let (active_toolchain_name, _active_source) = active_toolchain_and_source
-        .as_ref()
-        .map(|atar| (&atar.0, &atar.1))
-        .unzip();
-
-    // show installed toolchains
-    print_header(&t, "installed toolchains")?;
-
-    let default_toolchain_name = cfg.get_default()?;
-    let last_index = installed_toolchains.len().wrapping_sub(1);
-    for (n, toolchain_name) in installed_toolchains.into_iter().enumerate() {
-        let is_default_toolchain = default_toolchain_name.as_ref() == Some(&toolchain_name);
-        let is_active_toolchain = active_toolchain_name == Some(&toolchain_name);
-
-        let status_str = match (is_active_toolchain, is_default_toolchain) {
-            (true, true) => " (active, default)",
-            (true, false) => " (active)",
-            (false, true) => " (default)",
-            (false, false) => "",
-        };
-
-        let mut t = t.lock();
-
-        writeln!(t, "{toolchain_name}{CONTEXT}{status_str}{CONTEXT:#}")?;
-
-        if verbose {
-            let toolchain = Toolchain::new(cfg, toolchain_name.into())?;
-            writeln!(
-                t,
-                "  {}\n  path: {}",
-                toolchain.rustc_version(),
-                toolchain.path().display()
-            )?;
-            if n != last_index {
-                writeln!(t)?;
-            }
-        }
-    }
-
-    // show active toolchain
-    writeln!(t.lock())?;
-
-    print_header(&t, "active toolchain")?;
-
-    let Some((active_toolchain_name, active_source)) = active_toolchain_and_source else {
-        writeln!(t.lock(), "no active toolchain")?;
-        return Ok(ExitCode::SUCCESS);
+fn show(cfg: &Cfg<'_>) -> anyhow::Result<ExitCode> {
+    let Some((name, _)) = cfg.active_toolchain()? else {
+        return Err(no_toolchain_error(cfg.process));
     };
-
-    writeln!(t.lock(), "name: {active_toolchain_name}")?;
-    writeln!(t.lock(), "active because: {}", active_source.to_reason())?;
-
-    let active_toolchain = match Toolchain::new(cfg, active_toolchain_name.clone().into()) {
-        Ok(active_toolchain) => active_toolchain,
-        Err(
-            RustupError::ToolchainNotInstalled { .. } | RustupError::PathToolchainNotInstalled(..),
-        ) => {
-            info!("the active toolchain `{active_toolchain_name}` is not installed");
-            return Ok(ExitCode::SUCCESS);
-        }
-        Err(e) => return Err(e.into()),
-    };
-
-    if verbose {
-        writeln!(t.lock(), "compiler: {}", active_toolchain.rustc_version())?;
-        writeln!(t.lock(), "path: {}", active_toolchain.path().display())?;
-    }
-
-    // show installed targets for the active toolchain
-    writeln!(t.lock(), "installed targets:")?;
-
-    let active_toolchain_targets = match active_toolchain_name {
-        ToolchainName::Channel(desc) => ChannelToolchain::new(cfg, desc)?
-            .components()?
-            .into_iter()
-            .filter_map(|c| {
-                (c.installed && c.component.short_name() == "rust-std")
-                    .then(|| c.component.target.expect("rust-std should have a target"))
-            })
-            .collect(),
-        ToolchainName::Custom(name) => {
-            Toolchain::new(cfg, ToolchainNameOrPath::Named(name.into()))?.installed_targets()?
-        }
-    };
-
-    for target in active_toolchain_targets {
-        writeln!(t.lock(), "  {target}")?;
-    }
-
-    fn print_header(t: &ColorableTerminal, text: &str) -> Result<(), Error> {
-        let divider = "-".repeat(text.len());
-        let mut term_lock = t.lock();
-        writeln!(term_lock, "{HEADER}{text}{HEADER:#}")?;
-        writeln!(term_lock, "{HEADER}{divider}{HEADER:#}")?;
-        Ok(())
-    }
-
+    writeln!(cfg.process.stdout().lock(), "{name}")?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -1387,10 +1101,7 @@ async fn show_active_toolchain(cfg: &Cfg<'_>, verbose: bool) -> anyhow::Result<E
                     cfg.process.stdout().lock(),
                     "{} ({})",
                     toolchain.name(),
-                    match source {
-                        ActiveSource::Default => Cow::Borrowed("default"),
-                        _ => Cow::Owned(source.to_reason()),
-                    }
+                    source.to_reason()
                 )?;
             }
         }
@@ -1626,8 +1337,19 @@ async fn toolchain_link(
     Ok(ExitCode::SUCCESS)
 }
 
+fn toolchain_unlink(cfg: &Cfg<'_>, toolchain: &CustomToolchainName) -> anyhow::Result<ExitCode> {
+    let path = ToolchainNameOrPath::from(toolchain.clone()).path(cfg);
+    let metadata = fs::symlink_metadata(&path)
+        .with_context(|| format!("no linked toolchain named '{toolchain}'"))?;
+    if !metadata.file_type().is_symlink() {
+        bail!("'{toolchain}' is not a linked custom toolchain");
+    }
+    utils::remove_dir("toolchain link", &path)?;
+    info!("unlinked toolchain {toolchain}");
+    Ok(ExitCode::SUCCESS)
+}
+
 async fn toolchain_remove(cfg: &Cfg<'_>, opts: UninstallOpts) -> anyhow::Result<ExitCode> {
-    let default_toolchain = cfg.get_default().ok().flatten();
     let active_toolchain = cfg
         .maybe_ensure_active_toolchain(Some(false))
         .await
@@ -1643,15 +1365,7 @@ async fn toolchain_remove(cfg: &Cfg<'_>, opts: UninstallOpts) -> anyhow::Result<
             .is_some_and(|n| n == &toolchain_name)
         {
             warn!(
-                "removing the active toolchain; a toolchain override will be required for running Rust tools"
-            );
-        }
-        if default_toolchain
-            .as_ref()
-            .is_some_and(|n| n == &toolchain_name)
-        {
-            warn!(
-                "removing the default toolchain; proc-macros and build scripts might no longer build"
+                "removing the active toolchain; a toolchain will be required for running Rust tools"
             );
         }
 
@@ -1663,40 +1377,14 @@ async fn toolchain_remove(cfg: &Cfg<'_>, opts: UninstallOpts) -> anyhow::Result<
 fn pin_active_toolchain(qualified: bool, cfg: &Cfg<'_>) -> anyhow::Result<ExitCode> {
     let default_host = cfg.default_host_tuple()?;
 
-    let (mut r#override, backfill_components) = match cfg.find_override_config()? {
-        Some((o, _)) => (o, None),
-        None => {
-            let default = cfg
-                .get_default_resolvable()?
-                .context("no default toolchain to pin")?;
-            let components = match &default {
-                PartialToolchainName::Channel(desc) => {
-                    let tc = ChannelToolchain::new(cfg, desc.clone().complete(&default_host)?)?;
-                    let manifest = tc.get_manifest()?;
-
-                    Some(
-                        tc.components()?
-                            .into_iter()
-                            .filter_map(|c| {
-                                (c.available && c.installed)
-                                    .then(|| manifest.display_name(&c.component, &default_host))
-                            })
-                            .collect(),
-                    )
-                }
-                PartialToolchainName::Custom(_) => None,
-            };
-            (OverrideCfg::from(default), components)
-        }
+    let Some((mut r#override, _)) = cfg.find_override_config()? else {
+        anyhow::bail!("no toolchain is selected to pin");
     };
     if qualified {
         r#override.qualify(&default_host);
     }
 
-    let mut r#override = OverrideFile::from(r#override);
-    if backfill_components.is_some() {
-        r#override.toolchain.components = backfill_components;
-    }
+    let r#override = OverrideFile::from(r#override);
 
     let rel_path = "rust-toolchain.toml";
     let path = cfg.process.current_dir()?.join(rel_path);
@@ -1720,104 +1408,6 @@ fn pin_active_toolchain(qualified: bool, cfg: &Cfg<'_>) -> anyhow::Result<ExitCo
             "# Check the docs at https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file\n\n{toml_buf}",
         ),
     )?;
-    Ok(ExitCode::SUCCESS)
-}
-
-async fn override_add(
-    cfg: &Cfg<'_>,
-    toolchain: Override<PartialToolchainName>,
-    path: Option<&Path>,
-) -> anyhow::Result<ExitCode> {
-    let toolchain_name = toolchain
-        .clone()
-        .resolve(cfg)?
-        .complete(&cfg.default_host_tuple()?)?;
-    match Toolchain::new(cfg, toolchain_name.clone().into()) {
-        Ok(_) => {}
-        Err(e @ RustupError::ToolchainNotInstalled { .. }) => match &toolchain_name {
-            ToolchainName::Custom(_) => Err(e)?,
-            ToolchainName::Channel(desc) => {
-                let options = DistOptions::new(&[], &[], desc, cfg.get_profile()?, false, cfg)?;
-                let status = ChannelToolchain::install(options).await?.status;
-                writeln!(cfg.process.stdout().lock())?;
-                common::show_channel_update(
-                    cfg,
-                    PackageUpdate::Toolchain(desc.clone()),
-                    Ok(status),
-                )?;
-            }
-        },
-        Err(e) => Err(e)?,
-    }
-
-    // Relative to the directory rustup runs in, which `path::absolute` alone
-    // would take from the OS rather than from `cfg`.
-    let path = match path {
-        Some(path) => &path::absolute(cfg.current_dir.join(path))?,
-        None => &cfg.current_dir,
-    };
-    cfg.make_override(path, &toolchain)?;
-    Ok(ExitCode::SUCCESS)
-}
-
-fn override_remove(
-    cfg: &Cfg<'_>,
-    path: Option<&Path>,
-    nonexistent: bool,
-) -> anyhow::Result<ExitCode> {
-    let paths = if nonexistent {
-        let list: Vec<_> = cfg.settings_file.with(|s| {
-            Ok(s.overrides
-                .keys()
-                .filter_map(|k| {
-                    let path = Path::new(k);
-                    (!path.is_dir()).then(|| path.to_owned())
-                })
-                .collect())
-        })?;
-        if list.is_empty() {
-            info!("no nonexistent paths detected");
-        }
-        list
-    } else if let Some(path) = path {
-        vec![path::absolute(cfg.current_dir.join(path))?]
-    } else {
-        vec![cfg.current_dir.clone()]
-    };
-
-    for p in &paths {
-        if cfg.settings_file.with_mut(|s| Ok(s.remove_override(p)))? {
-            info!("override toolchain for '{}' removed", p.display());
-        } else {
-            info!("no override toolchain for '{}'", p.display());
-            if path.is_none() && !nonexistent {
-                info!(
-                    "you may use `--path <path>` option to remove override toolchain \
-                     for a specific path"
-                );
-            }
-        }
-    }
-    Ok(ExitCode::SUCCESS)
-}
-
-fn set_auto_self_update(
-    cfg: &Cfg<'_>,
-    auto_self_update_mode: SelfUpdateMode,
-) -> anyhow::Result<ExitCode> {
-    if cfg!(feature = "no-self-update") {
-        let mut args = cfg.process.args_os();
-        let arg0 = args.next().map(PathBuf::from);
-        let arg0 = arg0
-            .as_ref()
-            .and_then(|a| a.to_str())
-            .ok_or(CliError::NoExeName)?;
-        warn!(
-            "{} is built with the no-self-update feature: setting auto-self-update will not have any effect.",
-            arg0
-        );
-    }
-    cfg.set_auto_self_update(auto_self_update_mode)?;
     Ok(ExitCode::SUCCESS)
 }
 

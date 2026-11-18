@@ -140,9 +140,10 @@ async fn rustup_component_list() {
     let name = "rustup_component_list";
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect_with_env(
             ["rustup", "component", "list"],
@@ -174,32 +175,6 @@ fn rustup_component_cmd_remove_cmd_help_flag() {
     );
 }
 
-#[tokio::test]
-async fn rustup_default() {
-    let name = "rustup_default";
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    cx.config
-        .expect_with_env(
-            ["rustup", "default", "nightly"],
-            [("RUSTUP_TERM_COLOR", "always")],
-        )
-        .await
-        .with_stdout(Data::read_from(
-            Path::new(&format!("tests/suite/cli_rustup_ui/{name}.stdout.term.svg")),
-            None,
-        ))
-        .with_stderr(Data::read_from(
-            Path::new(&format!("tests/suite/cli_rustup_ui/{name}.stderr.term.svg")),
-            None,
-        ))
-        .is_ok();
-}
-
-#[test]
-fn rustup_default_cmd_help_flag() {
-    test_help("rustup_default_cmd_help_flag", &["default", "--help"]);
-}
-
 #[test]
 fn rustup_doc_cmd_help_flag() {
     test_help("rustup_doc_cmd_help_flag", &["doc", "--help"]);
@@ -211,50 +186,6 @@ fn rustup_man_cmd_help_flag() {
     test_help("rustup_man_cmd_help_flag", &["man", "--help"]);
 }
 
-#[test]
-fn rustup_override_cmd_help_flag() {
-    test_help("rustup_override_cmd_help_flag", &["override", "--help"]);
-}
-
-#[test]
-fn rustup_override_cmd_add_cmd_help_flag() {
-    test_help(
-        "rustup_override_cmd_add_cmd_help_flag",
-        &["override", "add", "--help"],
-    );
-}
-
-#[test]
-fn rustup_override_cmd_list_cmd_help_flag() {
-    test_help(
-        "rustup_override_cmd_list_cmd_help_flag",
-        &["override", "list", "--help"],
-    );
-}
-
-#[test]
-fn rustup_override_cmd_remove_cmd_help_flag() {
-    test_help(
-        "rustup_override_cmd_remove_cmd_help_flag",
-        &["override", "remove", "--help"],
-    );
-}
-
-#[test]
-fn rustup_override_cmd_set_cmd_help_flag() {
-    test_help(
-        "rustup_override_cmd_set_cmd_help_flag",
-        &["override", "set", "--help"],
-    );
-}
-
-#[test]
-fn rustup_override_cmd_unset_cmd_help_flag() {
-    test_help(
-        "rustup_override_cmd_unset_cmd_help_flag",
-        &["override", "unset", "--help"],
-    );
-}
 
 #[test]
 fn rustup_run_cmd_help_flag() {
@@ -271,14 +202,6 @@ fn rustup_self_cmd_uninstall_cmd_help_flag() {
     test_help(
         "rustup_self_cmd_uninstall_cmd_help_flag",
         &["self", "uninstall", "--help"],
-    );
-}
-
-#[test]
-fn rustup_self_cmd_update_cmd_help_flag() {
-    test_help(
-        "rustup_self_cmd_update_cmd_help_flag",
-        &["self", "update", "--help"],
     );
 }
 
@@ -304,14 +227,6 @@ fn rustup_set_cmd_auto_install_cmd_help_flag() {
 }
 
 #[test]
-fn rustup_set_cmd_auto_self_update_cmd_help_flag() {
-    test_help(
-        "rustup_set_cmd_auto_self_update_cmd_help_flag",
-        &["set", "auto-self-update", "--help"],
-    );
-}
-
-#[test]
 fn rustup_set_cmd_default_host_cmd_help_flag() {
     test_help(
         "rustup_set_cmd_default_host_cmd_help_flag",
@@ -332,13 +247,17 @@ async fn rustup_show_toolchain() {
     let name = "rustup_show_toolchain";
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect_with_env(["rustup", "show"], [("RUSTUP_TERM_COLOR", "always")])
         .await
-        .extend_redactions([("[RUSTUP_DIR]", &cx.config.rustupdir.to_string())])
+        .extend_redactions([
+            ("[RUSTUP_DIR]", &cx.config.rustupdir.to_string()),
+            ("[CWD]", &cx.config.current_dir().display().to_string()),
+        ])
         .with_stdout(Data::read_from(
             Path::new(&format!("tests/suite/cli_rustup_ui/{name}.stdout.term.svg")),
             None,

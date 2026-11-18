@@ -33,11 +33,12 @@ in the background. Disable antivirus scanner and try again.
 
 ### I get "error: could not remove 'rustup-bin' file: 'C:\Users\USER\\.cargo\bin\rustup.exe'"
 
-If `rustup` fails to self-update in this way it's usually because RLS is
-running (your editor is open and running RLS). The solution is to stop RLS (by
-closing your editor) and try again.
+If `rustup self uninstall` fails to remove `rustup.exe` this way, another
+program has that file open. Close that program and try again.
 
 ### rustup exited successfully but I can't run `rustc --version`
 
-Restart your shell. This will reload your `PATH` environment
-variable to include Cargo's bin directory (`$CARGO_HOME/bin`).
+`rustup` does not put toolchain binaries on `PATH`. Name a toolchain in
+`rust-toolchain.toml`, or run `rustup +nightly run rustc --version` or
+`rustup run nightly rustc --version`. The toolchain binary can also be
+invoked by its path.

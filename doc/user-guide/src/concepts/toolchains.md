@@ -70,10 +70,9 @@ it, and then run:
 
 ```console
 $ rustup toolchain link my-toolchain ~/rust/build/x86_64-unknown-linux-gnu/stage2/
-$ rustup default my-toolchain
 ```
 
-Now you can name `my-toolchain` as any other `rustup` toolchain. Create a
+Name `my-toolchain` in `rust-toolchain.toml`, or pass `+my-toolchain`. Create a
 `rustup` toolchain for each of your `rust-lang/rust` workspaces and test them
 easily with `rustup run my-toolchain rustc`.
 

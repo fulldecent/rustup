@@ -5,7 +5,6 @@ use std::{
     fmt::Display,
     fs,
     io::{BufRead, Write},
-    path::Path,
     sync::LazyLock,
 };
 
@@ -24,7 +23,7 @@ use crate::{
     install::{InstallMethod, UpdateStatus},
     process::Process,
     toolchain::{Toolchain, ToolchainName, ToolchainNameOrPath},
-    utils::{self, ExitCode},
+    utils::ExitCode,
 };
 
 pub(crate) const WARN_COMPLETE_PROFILE: &str = "\
@@ -100,6 +99,7 @@ pub(crate) fn question_str(
     }
 }
 
+#[cfg(windows)]
 pub(crate) fn question_bool(
     question: &str,
     default: bool,
@@ -145,14 +145,12 @@ pub(crate) fn show_channel_update(
 }
 
 pub(crate) enum PackageUpdate {
-    Rustup,
     Toolchain(ChannelToolchainName),
 }
 
 impl Display for PackageUpdate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Rustup => write!(f, "rustup"),
             Self::Toolchain(t) => write!(f, "{t}"),
         }
     }
@@ -171,19 +169,6 @@ fn show_channel_updates(
         };
 
         let (previous_version, version) = match &pkg {
-            PackageUpdate::Rustup => {
-                let previous_version: Option<String> = match result {
-                    Ok(UpdateStatus::Installed) | Ok(UpdateStatus::Unchanged) | Err(_) => None,
-                    _ => Some(env!("CARGO_PKG_VERSION").into()),
-                };
-                let version = match result {
-                    Err(_) | Ok(UpdateStatus::Installed) | Ok(UpdateStatus::Unchanged) => {
-                        env!("CARGO_PKG_VERSION").into()
-                    }
-                    Ok(UpdateStatus::Updated(v)) => v,
-                };
-                (previous_version, version)
-            }
             PackageUpdate::Toolchain(name) => {
                 // this is a bit strange: we don't supply the version we
                 // presumably had (for Installed and Unchanged), so we query it
@@ -326,7 +311,6 @@ pub(crate) async fn list_toolchains(
     if toolchains.is_empty() {
         info!("no installed toolchains");
     } else {
-        let default_toolchain_name = cfg.get_default()?;
         let active_toolchain_name: Option<ToolchainName> =
             if let Ok(Some((ToolchainNameOrPath::Named(toolchain), _source))) =
                 cfg.maybe_ensure_active_toolchain(None).await
@@ -338,13 +322,11 @@ pub(crate) async fn list_toolchains(
 
         toolchains.sort();
         for toolchain in toolchains {
-            let is_default_toolchain = default_toolchain_name.as_ref() == Some(&toolchain);
             let is_active_toolchain = active_toolchain_name.as_ref() == Some(&toolchain);
 
             print_toolchain(
                 cfg,
                 &toolchain.to_string(),
-                is_default_toolchain,
                 is_active_toolchain,
                 verbose,
                 quiet,
@@ -356,7 +338,6 @@ pub(crate) async fn list_toolchains(
     fn print_toolchain(
         cfg: &Cfg<'_>,
         toolchain: &str,
-        is_default: bool,
         is_active: bool,
         verbose: bool,
         quiet: bool,
@@ -366,12 +347,7 @@ pub(crate) async fn list_toolchains(
             return Ok(());
         }
 
-        let status_str = match (is_default, is_active) {
-            (true, true) => " (active, default)",
-            (true, false) => " (default)",
-            (false, true) => " (active)",
-            (false, false) => "",
-        };
+        let status_str = if is_active { " (active)" } else { "" };
 
         let toolchain_path = cfg.toolchains_dir.join(toolchain);
         let toolchain_meta = fs::symlink_metadata(&toolchain_path)?;
@@ -392,37 +368,6 @@ pub(crate) async fn list_toolchains(
         Ok(())
     }
 
-    Ok(ExitCode::SUCCESS)
-}
-
-pub(crate) fn list_overrides(cfg: &Cfg<'_>) -> anyhow::Result<ExitCode> {
-    let overrides = cfg.settings_file.with(|s| Ok(s.overrides.clone()))?;
-
-    if overrides.is_empty() {
-        writeln!(cfg.process.stdout().lock(), "no overrides")?;
-    } else {
-        let mut any_not_exist = false;
-        for (k, v) in overrides {
-            let dir_exists = Path::new(&k).is_dir();
-            if !dir_exists {
-                any_not_exist = true;
-            }
-            writeln!(
-                cfg.process.stdout().lock(),
-                "{:<40}\t{:<20}",
-                utils::format_path_for_display(&k)
-                    + if dir_exists { "" } else { " (not a directory)" },
-                v
-            )?
-        }
-        if any_not_exist {
-            writeln!(cfg.process.stdout().lock())?;
-            info!(
-                "you may remove overrides for non-existent directories with
-`rustup override unset --nonexistent`"
-            );
-        }
-    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -517,23 +462,6 @@ pub fn report_error(e: &anyhow::Error, process: &Process) {
         error!("{:?}", e);
     } else {
         error!("{:#}", e);
-    }
-}
-
-pub(crate) fn ignorable_error(
-    error: &'static str,
-    no_prompt: bool,
-    process: &Process,
-) -> anyhow::Result<()> {
-    let error = anyhow!(error);
-    report_error(&error, process);
-    if no_prompt {
-        warn!("continuing (because the -y flag is set and the error is ignorable)");
-        Ok(())
-    } else if confirm("\nContinue? (y/N)", false, process).unwrap_or(false) {
-        Ok(())
-    } else {
-        Err(error)
     }
 }
 

@@ -251,6 +251,14 @@ impl Config {
         self.workdir.borrow().clone()
     }
 
+    /// Write `rust-toolchain.toml` in the working directory.
+    ///
+    /// This names a toolchain. It does not install one.
+    pub fn pin(&self, channel: &str) {
+        let path = self.current_dir().join("rust-toolchain.toml");
+        fs::write(path, format!("[toolchain]\nchannel = \"{channel}\"\n")).unwrap();
+    }
+
     pub fn cmd<I, A>(&self, name: &str, args: I) -> Command
     where
         I: IntoIterator<Item = A>,
@@ -905,11 +913,6 @@ async fn setup_test_state(test_dist_dir: TempDir) -> (TempDir, Config) {
         .run("rustup", ["set", "default-host", &this_host_tuple()], &[])
         .await;
 
-    // Set the auto update mode to disable, as most tests do not want to update rustup itself during the test.
-    config
-        .run("rustup", ["set", "auto-self-update", "disable"], &[])
-        .await;
-
     // Create some custom toolchains
     create_custom_toolchains(&config.customdir);
 
@@ -1377,27 +1380,19 @@ where
     A: AsRef<OsStr>,
 {
     // Only the rustup alias is currently ready for in-process testing:
-    // - -init performs self-update which monkey with global external state.
-    // - proxies themselves behave appropriately the proxied output needs to be
-    //   collected for assertions to be made on it as our tests traverse layers.
-    // - self update executions cannot run in-process because on windows the
-    //   process replacement dance would replace the test process.
-    // - any command with --version in it is testing to see something was
-    //   installed properly, so we have to shell out to it to be sure
+    // - rustup-init copies the test binary and touches install state.
+    // - proxies need their output collected as the tests traverse layers.
+    // - `self uninstall` deletes the running binary on some platforms.
+    // - any command with --version in it is testing that something was
+    //   installed properly, so the test shells out to that binary.
     if name != "rustup" {
         return false;
     }
-    let mut is_update = false;
-    let mut no_self_update = false;
     let mut self_cmd = false;
     let mut run = false;
     let mut version = false;
     for arg in args {
-        if arg.as_ref() == "update" {
-            is_update = true;
-        } else if arg.as_ref() == "--no-self-update" {
-            no_self_update = true;
-        } else if arg.as_ref() == "self" {
+        if arg.as_ref() == "self" {
             self_cmd = true;
         } else if arg.as_ref() == "run" {
             run = true;
@@ -1405,7 +1400,7 @@ where
             version = true;
         }
     }
-    !(run || self_cmd || version || (is_update && !no_self_update))
+    !(run || self_cmd || version)
 }
 
 /// This is going to run the compiler to create an executable that

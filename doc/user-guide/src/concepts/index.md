@@ -2,17 +2,25 @@
 
 ## How rustup works
 
-`rustup` is a _toolchain multiplexer_. It installs and manages many Rust
-toolchains and presents them all through a single set of tools installed to
-`~/.cargo/bin`. The [`rustc`] and [`cargo`] executables installed in
-`~/.cargo/bin` are _[proxies]_ that delegate to the real toolchain. `rustup`
-then provides mechanisms to easily change the active toolchain by
-reconfiguring the behavior of the proxies.
+`rustup` installs and manages many Rust toolchains. A rustup command selects
+one toolchain in this order:
 
-So when `rustup` is first installed, running `rustc` will run the proxy in
-`$HOME/.cargo/bin/rustc`, which in turn will run the stable compiler. If you
-later _change the default toolchain_ to nightly with `rustup default nightly`,
-then that same proxy will run the `nightly` compiler instead.
+1. An in-line specification on that command, such as
+   `rustup +nightly run cargo build` or `rustup run nightly cargo build`.
+2. The nearest `rust-toolchain.toml`, walking from the current directory
+   toward the filesystem root.
+
+If neither is present, the command exits with an error.
+
+`rustup run` installs a missing channel from that selection and puts the
+toolchain's binaries and libraries on the child process path. With no
+toolchain argument, as in `rustup run cargo build`, the file walk above
+supplies the toolchain.
+
+The installer copies only the `rustup` binary. Invoking that binary under
+another name, such as [`rustc`] or [`cargo`], makes a [shim][proxies]. The
+same two rules apply. A shim is not recommended. The installer does not
+create one, and these instructions do not ask you to put one on `PATH`.
 
 This is similar to Ruby's [rbenv], Python's [pyenv], or Node's [nvm].
 
@@ -48,8 +56,10 @@ This is similar to Ruby's [rbenv], Python's [pyenv], or Node's [nvm].
   "profile" defines a grouping of components. See the [Profiles] chapter for
   more details.
 
-- **proxy** --- A wrapper for a common Rust component (like `rustc`), built to forward
-  CLI invocations to the active Rust toolchain. See the [Proxies] chapter for more details.
+- **shim** --- The rustup binary invoked under the name of a Rust tool, such as
+  `rustc` or `cargo`. It forwards that command to the selected toolchain. A
+  shim is not recommended. See the [Proxies] chapter for the names rustup
+  recognizes.
 
 [`clippy`]: https://github.com/rust-lang/rust-clippy
 [components]: components.md

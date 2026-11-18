@@ -34,7 +34,7 @@ pub(crate) use channels::ChannelToolchain;
 
 mod names;
 pub(crate) use names::{
-    CustomToolchainName, MaybeChannelToolchainName, MaybePartialToolchainName, Override,
+    CustomToolchainName, MaybeChannelToolchainName, Override,
     PartialToolchainName, PartialToolchainNameOrPath, ToolchainName, ToolchainNameExt,
     ToolchainNameOrPath, ToolchainPath,
 };
@@ -82,24 +82,13 @@ impl<'a> Toolchain<'a> {
         }
 
         let source_err = match source {
-            ActiveSource::Environment => {
-                "the RUSTUP_TOOLCHAIN environment variable specifies an uninstalled toolchain"
-                    .to_string()
-            }
             ActiveSource::CommandLine => {
                 "the +toolchain on the command line specifies an uninstalled toolchain".to_string()
             }
-            ActiveSource::OverrideDb(path) => format!(
-                "the directory override for '{}' specifies an uninstalled toolchain",
-                utils::canonicalize_path(path).display(),
-            ),
             ActiveSource::ToolchainFile(path) => format!(
                 "the toolchain file at '{}' specifies an uninstalled toolchain",
                 utils::canonicalize_path(path).display(),
             ),
-            ActiveSource::Default => {
-                "the default toolchain does not describe an installed toolchain".to_string()
-            }
         };
 
         Err(anyhow!(source_err).context(format!("override toolchain '{name}' is not installed")))
@@ -151,7 +140,6 @@ impl<'a> Toolchain<'a> {
 
         env_var::inc("RUST_RECURSION_COUNT", cmd, self.cfg.process);
 
-        cmd.env("RUSTUP_TOOLCHAIN", format!("{}", self.name));
         cmd.env("RUSTUP_HOME", &self.cfg.rustup_dir);
     }
 
@@ -200,59 +188,18 @@ impl<'a> Toolchain<'a> {
 
         env_var::insert_path(sysenv::LOADER_PATH, new_path, None, cmd, self.cfg.process);
 
-        // Prepend CARGO_HOME/bin to the PATH variable so that we're sure to run
-        // cargo/rustc via the proxy bins. There is no fallback case for if the
-        // proxy bins don't exist. We'll just be running whatever happens to
-        // be on the PATH.
-        let mut path_entries = vec![];
-        if let Ok(cargo_home) = self.cfg.process.cargo_home() {
-            path_entries.push(cargo_home.join("bin"));
-        }
-
-        // On Windows, we append the "bin" directory to PATH by default.
-        // Windows loads DLLs from PATH and the "bin" directory contains DLLs
-        // that proc macros and other tools not in the sysroot use.
-        // It's appended rather than prepended so that the exe files in "bin"
-        // do not take precedence over anything else in PATH.
-        //
-        // Historically rustup prepended the bin directory in PATH but doing so causes
-        // problems because calling tools recursively (like `cargo
-        // +nightly metadata` from within a cargo subcommand). The
-        // recursive call won't work because it is not executing the
-        // proxy, so the `+` toolchain override doesn't work.
-        // See: https://github.com/rust-lang/rustup/pull/3178
-        //
-        // This behaviour was then changed to not add the bin directory at all.
-        // But this caused another set of problems due to the sysroot DLLs
-        // not being found by the loader, e.g. for proc macros.
-        // See: https://github.com/rust-lang/rustup/issues/3825
-        //
-        // Which is how we arrived at the current default described above.
-        //
-        // The `RUSTUP_WINDOWS_PATH_ADD_BIN` environment variable allows
-        // users to opt-in to one of the old behaviours in case the new
-        // default causes any new issues.
-        //
-        // FIXME: The `RUSTUP_WINDOWS_PATH_ADD_BIN` environment variable can
-        // be removed once we're confident that the default behaviour works.
-        let append = if cfg!(target_os = "windows") {
-            let add_bin = self.cfg.process.var("RUSTUP_WINDOWS_PATH_ADD_BIN");
-            match add_bin.as_deref().unwrap_or("append") {
-                // Don't add to PATH at all
-                "0" => None,
-                // Prepend to PATH
-                "1" => {
-                    path_entries.push(self.path.join("bin"));
-                    None
-                }
-                // Append to PATH (the default)
-                _ => Some(self.path.join("bin")),
-            }
-        } else {
-            None
-        };
-
-        env_var::insert_path("PATH", path_entries, append, cmd, self.cfg.process);
+        // The child must see this toolchain's binaries and, on Windows, its
+        // DLLs. Those directories come first. Cargo's bin directory is appended
+        // so a `cargo install` binary can still be found, without a rustup
+        // proxy shadowing the toolchain.
+        let path_entries = vec![self.path.join("bin")];
+        let cargo_bin = self
+            .cfg
+            .process
+            .cargo_home()
+            .ok()
+            .map(|cargo_home| cargo_home.join("bin"));
+        env_var::insert_path("PATH", path_entries, cargo_bin, cmd, self.cfg.process);
     }
 
     /// Infallible function that describes the version of rustc in an installed distribution
@@ -444,18 +391,16 @@ impl<'a> Toolchain<'a> {
         };
 
         let bin_path = self.path.join("bin").join(&binary);
-        let path = if utils::is_file(&bin_path) {
-            &bin_path
-        } else {
-            let recursion_count = self
-                .cfg
-                .process
-                .var("RUST_RECURSION_COUNT")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-            if recursion_count > env_var::RUST_RECURSION_COUNT_MAX - 1 {
-                let binary_lossy: String = binary.to_string_lossy().into();
+        if !utils::is_file(&bin_path) {
+            let binary_lossy: String = binary.to_string_lossy().into();
+            let stem = match EXE_SUFFIX {
+                "" => binary_lossy.as_str(),
+                suffix => binary_lossy.strip_suffix(suffix).unwrap_or(&binary_lossy),
+            };
+            // A missing proxy (rustc, cargo, …) must not be launched by name.
+            // PATH would find this rustup and re-enter it. Any other command is
+            // an ordinary program and is resolved from PATH.
+            if crate::is_proxyable_tools(stem).is_ok() {
                 if matches!(
                     &self.name,
                     ToolchainNameOrPath::Named(ToolchainName::Channel(_))
@@ -475,9 +420,11 @@ impl<'a> Toolchain<'a> {
                     ));
                 }
             }
-            Path::new(&binary)
-        };
-        let mut cmd = Command::new(path);
+            let mut cmd = Command::new(&binary_lossy);
+            self.set_env(&mut cmd);
+            return Ok(cmd);
+        }
+        let mut cmd = Command::new(&bin_path);
         self.set_env(&mut cmd);
 
         // If we're running cargo and the `CARGO` environment variable is set
@@ -486,11 +433,10 @@ impl<'a> Toolchain<'a> {
         // This works around an issue with old versions of cargo not updating
         // the environment variable itself.
         if Path::new(&binary).file_stem() == Some("cargo".as_ref())
-            && path.is_absolute()
             && let Some(cargo) = self.cfg.process.var_os("CARGO")
             && fs::read_link(&cargo).is_ok_and(|p| p.file_stem() == Some("rustup".as_ref()))
         {
-            cmd.env("CARGO", path);
+            cmd.env("CARGO", &bin_path);
         }
         Ok(cmd)
     }

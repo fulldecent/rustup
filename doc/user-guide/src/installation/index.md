@@ -3,22 +3,24 @@
 Follow the instructions at <https://www.rust-lang.org/tools/install>. If that
 doesn't work for you there are [other installation methods].
 
-`rustup` installs `rustc`, `cargo`, `rustup` and other standard tools to
-Cargo's `bin` directory. On Unix it is located at `$HOME/.cargo/bin` and on
-Windows at `%USERPROFILE%\.cargo\bin`. This is the same directory that `cargo
-install` will install Rust programs and Cargo plugins.
+`rustup-init` copies the `rustup` binary to `$HOME/.cargo/bin/rustup` on
+Unix and to `%USERPROFILE%\.cargo\bin\rustup.exe` on Windows. The installer
+leaves `PATH` unchanged and does not download a toolchain.
 
-This directory will be in your `$PATH` environment variable, which means you
-can run them from the shell without further configuration. Open a _new_ shell
-and type the following:
+Invoke that executable, install a toolchain, and name it:
 
 ```console
-rustc --version
+rustup toolchain install stable
 ```
 
-If you see something like `rustc 1.19.0 (0ade33941 2017-07-17)` then you are
-ready to Rust. If you decide Rust isn't your thing, you can completely remove
-it from your system by running `rustup self uninstall`.
+```toml
+[toolchain]
+channel = "stable"
+```
+
+A command also accepts an in-line toolchain, such as
+`rustup run stable cargo build`. Remove the install with
+`rustup self uninstall`.
 
 [other installation methods]: other.md
 
@@ -30,39 +32,24 @@ executable. As mentioned in the [Environment Variables] section, `RUSTUP_HOME`
 sets the root `rustup` folder, which is used for storing installed toolchains
 and configuration options. `CARGO_HOME` contains cache files used by [cargo].
 
-Note that you will need to ensure these environment variables are always set
-and that `CARGO_HOME/bin` is in the `$PATH` environment variable when using
-the toolchain.
+Keep these environment variables set for later `rustup` commands. The
+installer does not add `CARGO_HOME/bin` to `PATH`.
 
 [Environment Variables]: ../environment-variables.md
 [cargo]: https://doc.rust-lang.org/cargo/
 
 ## Installing nightly
 
-If you specify the [nightly channel] when installing `rustup`, the
-`rustup-init` script will do a "forced" installation by default. A "forced"
-installation means it will install the nightly channel regardless of whether
-it might be missing [components] that you want. If you want to install rustup
-with the nightly channel, and ensure it has the components that you want, you
-will need to do this in two phases. For example, if you want to make a fresh
-installation of `rustup` and then install `nightly` along with `clippy` or
-`miri`, first install `rustup` without a toolchain:
-
-```console
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain none -y
-```
-
-Next you can install `nightly` allowing `rustup` to downgrade until it finds
-the components you need:
+`rustup-init` does not download a toolchain. Install the channel you want
+afterwards. To install `nightly` along with `clippy` or `miri`, and allow
+rustup to downgrade until those [components] exist:
 
 ```console
 rustup toolchain install nightly --allow-downgrade --profile minimal --component clippy
 ```
 
-This can be used to great effect in CI, to get you a toolchain rapidly which
-meets your criteria.
+This can be used in CI to get a toolchain which meets your criteria.
 
-[nightly channel]: ../concepts/channels.md
 [components]: ../concepts/components.md
 
 ## Enable tab completion for Bash, Fish, Zsh, or PowerShell

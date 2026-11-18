@@ -245,18 +245,6 @@ impl fmt::Display for RustupHome {
     }
 }
 
-/// Create an isolated rustup home with no content, then call f with it, and
-/// delete it afterwards.
-#[cfg(test)]
-pub(super) fn with_rustup_home<F>(f: F) -> anyhow::Result<()>
-where
-    F: FnOnce(&RustupHome) -> anyhow::Result<()>,
-{
-    let test_dir = test_dir()?;
-    let rustup_home = RustupHome::new_in(test_dir)?;
-    f(&rustup_home)
-}
-
 pub mod topical_doc_data {
     use std::{collections::HashSet, path::PathBuf};
 

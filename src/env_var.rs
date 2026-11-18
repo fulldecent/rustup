@@ -14,10 +14,11 @@ pub(crate) fn insert_path(
     let old_value = process.var_os(name);
     let mut parts = if let Some(v) = &old_value {
         let mut tail = env::split_paths(v).collect::<VecDeque<_>>();
+        // Prepended directories belong at the front. Drop any earlier copy so
+        // a directory already on PATH cannot stay ahead of them.
         for path in prepend.into_iter().rev() {
-            if !tail.contains(&path) {
-                tail.push_front(path);
-            }
+            tail.retain(|entry| entry != &path);
+            tail.push_front(path);
         }
         tail
     } else {
@@ -88,14 +89,46 @@ mod tests {
                 Some(
                     env::join_paths(
                         [
-                            "/home/z/.cargo/bin",
                             "/home/a/.cargo/bin",
+                            "/home/z/.cargo/bin",
                             "/home/b/.cargo/bin"
                         ]
                         .iter()
                     )
                     .unwrap()
                     .as_os_str()
+                )
+            ),]
+        );
+    }
+
+    #[test]
+    fn prepend_moves_existing_path_to_the_front() {
+        let mut vars = HashMap::new();
+        vars.env(
+            "PATH",
+            env::join_paths(["/other/bin", "/toolchain/bin"].iter()).unwrap(),
+        );
+        let tp = TestProcess::with_vars(vars);
+        let mut cmd = Command::new("test");
+
+        insert_path(
+            "PATH",
+            vec![PathBuf::from("/toolchain/bin")],
+            None,
+            &mut cmd,
+            &tp.process,
+        );
+
+        let envs: Vec<_> = cmd.get_envs().collect();
+        assert_eq!(
+            envs,
+            &[(
+                OsStr::new("PATH"),
+                Some(
+                    env::join_paths(["/toolchain/bin", "/other/bin"].iter())
+                        .unwrap()
+                        .as_os_str()
                 )
             ),]
         );

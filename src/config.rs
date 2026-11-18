@@ -14,7 +14,7 @@ use thiserror::Error as ThisError;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    cli::{common, self_update::SelfUpdateMode},
+    cli::common,
     dist::{
         self, ChannelToolchainName, DistOptions, PartialChannelToolchainName, PartialTargetTuple,
         Profile, Switch, TargetTuple,
@@ -111,22 +111,14 @@ impl<T: Into<String>> From<T> for OverrideFile {
 // Represents the source that determined the current active toolchain.
 #[derive(Clone, Debug)]
 pub(crate) enum ActiveSource {
-    Default,
-    Environment,
     CommandLine,
-    OverrideDb(PathBuf),
     ToolchainFile(PathBuf),
 }
 
 impl ActiveSource {
     pub fn to_reason(&self) -> String {
         match self {
-            Self::Default => String::from("it's the default toolchain"),
-            Self::Environment => {
-                String::from("overridden by environment variable RUSTUP_TOOLCHAIN")
-            }
             Self::CommandLine => String::from("overridden by +toolchain on the command line"),
-            Self::OverrideDb(path) => format!("directory override for '{}'", path.display()),
             Self::ToolchainFile(path) => format!("overridden by '{}'", path.display()),
         }
     }
@@ -135,10 +127,7 @@ impl ActiveSource {
 impl Display for ActiveSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::Default => "default",
-            Self::Environment => "env",
             Self::CommandLine => "cli",
-            Self::OverrideDb(_) => "path-override",
             Self::ToolchainFile(_) => "toolchain-file",
         })
     }
@@ -161,7 +150,7 @@ impl<T> EnsureInstalled<T> {
 }
 
 impl<T: Display> EnsureInstalled<T> {
-    fn warn_auto_install(&self, process: &Process) {
+    pub(crate) fn warn_auto_install(&self, process: &Process) {
         // If we're already in a recursion, or we haven't just installed the active toolchain, then
         // don't print the warning.
         let recursions = process.var("RUST_RECURSION_COUNT");
@@ -186,10 +175,9 @@ impl<T> Deref for EnsureInstalled<T> {
     }
 }
 
-// Represents a toolchain override from a +toolchain command line option,
-// RUSTUP_TOOLCHAIN environment variable, or rust-toolchain.toml file etc. Can
-// include components and targets from a rust-toolchain.toml that should be
-// downloaded and installed.
+// Represents a toolchain override from a +toolchain command line option
+// or a rust-toolchain.toml file. Can include components and targets from a
+// rust-toolchain.toml that should be downloaded and installed.
 #[derive(Clone, Debug)]
 pub(crate) enum OverrideCfg {
     PathBased(ToolchainPath),
@@ -234,10 +222,9 @@ impl OverrideCfg {
                     path.display()
                 )
             }
-            (None, None) => Override::Explicit(
-                cfg.get_default_resolvable()?
-                    .ok_or_else(|| no_toolchain_error(cfg.process))?,
-            ),
+            (None, None) => {
+                bail!("rust-toolchain.toml must set 'channel' or 'path'");
+            }
         };
         let toolchain_name = toolchain_name.resolve(cfg)?;
         Ok(match toolchain_name {
@@ -332,7 +319,6 @@ pub(crate) struct Cfg<'a> {
     update_hash_dir: PathBuf,
     pub download_dir: PathBuf,
     pub toolchain_override: Option<Override<PartialToolchainNameOrPath>>,
-    env_override: Option<Override<PartialToolchainNameOrPath>>,
     pub(crate) dist_root_server: String,
     pub dist_root_url: String,
     pub quiet: bool,
@@ -391,12 +377,6 @@ impl<'a> Cfg<'a> {
         let update_hash_dir = rustup_dir.join("update-hashes");
         let download_dir = rustup_dir.join("downloads");
 
-        // Environment override
-        let env_override = match &process.var_opt("RUSTUP_TOOLCHAIN")? {
-            Some(tc) => Some(Override::<PartialToolchainNameOrPath>::from_str(tc)?),
-            None => None,
-        };
-
         let dist_root_server = dist_root_server(process)?;
         let dist_root = dist_root_server.clone() + "/dist";
 
@@ -410,7 +390,6 @@ impl<'a> Cfg<'a> {
             update_hash_dir,
             download_dir,
             toolchain_override: None,
-            env_override,
             dist_root_server,
             dist_root_url: dist_root,
             quiet,
@@ -430,23 +409,6 @@ impl<'a> Cfg<'a> {
         Ok(cfg)
     }
 
-    pub(crate) fn set_default(
-        &self,
-        toolchain: Option<&PartialToolchainName>,
-    ) -> anyhow::Result<()> {
-        self.settings_file.with_mut(|s| {
-            s.default_toolchain = toolchain.map(|t| t.to_string());
-            Ok(())
-        })?;
-
-        match toolchain {
-            Some(t) => info!("default toolchain set to {t}"),
-            None => info!("default toolchain unset"),
-        }
-
-        Ok(())
-    }
-
     pub(crate) fn set_profile(&mut self, profile: Profile) -> anyhow::Result<()> {
         self.profile_override = None;
         self.settings_file.with_mut(|s| {
@@ -454,15 +416,6 @@ impl<'a> Cfg<'a> {
             Ok(())
         })?;
         info!("profile set to {}", profile.as_str());
-        Ok(())
-    }
-
-    pub(crate) fn set_auto_self_update(&self, mode: SelfUpdateMode) -> anyhow::Result<()> {
-        self.settings_file.with_mut(|s| {
-            s.auto_self_update = Some(mode);
-            Ok(())
-        })?;
-        info!("auto-self-update mode set to {}", mode.as_str());
         Ok(())
     }
 
@@ -584,13 +537,6 @@ impl<'a> Cfg<'a> {
         }
     }
 
-    pub(crate) fn find_default(&self) -> anyhow::Result<Option<Toolchain<'_>>> {
-        Ok(self
-            .get_default()?
-            .map(|n| Toolchain::new(self, n.into()))
-            .transpose()?)
-    }
-
     pub(crate) async fn toolchain_from_partial(
         &self,
         toolchain: Option<(PartialChannelToolchainName, ActiveSource)>,
@@ -637,17 +583,14 @@ impl<'a> Cfg<'a> {
     pub(crate) fn active_toolchain(
         &self,
     ) -> anyhow::Result<Option<(ToolchainNameOrPath, ActiveSource)>> {
-        Ok(
-            if let Some((override_config, source)) = self.find_override_config()? {
-                Some((
-                    override_config.into_local_toolchain_name(&self.default_host_tuple()?)?,
-                    source,
-                ))
-            } else {
-                self.get_default()?
-                    .map(|x| (x.into(), ActiveSource::Default))
-            },
-        )
+        if let Some((override_config, source)) = self.find_override_config()? {
+            Ok(Some((
+                override_config.into_local_toolchain_name(&self.default_host_tuple()?)?,
+                source,
+            )))
+        } else {
+            Ok(None)
+        }
     }
 
     pub(crate) fn find_override_config(
@@ -658,17 +601,7 @@ impl<'a> Cfg<'a> {
             if let Some(name) = &self.toolchain_override {
                 Some((name.clone().resolve(self)?.into(), ActiveSource::CommandLine))
             }
-            // Then check the RUSTUP_TOOLCHAIN environment variable
-            else if let Some(name) = &self.env_override {
-                // Because path based toolchain files exist, this has to support
-                // custom, distributable, and absolute path toolchains otherwise
-                // rustup's export of a RUSTUP_TOOLCHAIN when running a process will
-                // error when a nested rustup invocation occurs
-                Some((name.clone().resolve(self)?.into(), ActiveSource::Environment))
-            }
-            // Then walk up the directory tree from 'path' looking for either the
-            // directory in the override database, or a `rust-toolchain{.toml}` file,
-            // in that order.
+            // Then walk up the directory tree looking for a `rust-toolchain.toml` file.
             else if let Some((override_cfg, active_source)) = self.settings_file.with(|s| {
                     self.find_override_from_dir_walk(&self.current_dir, s)
                 })? {
@@ -687,66 +620,21 @@ impl<'a> Cfg<'a> {
         dir: &Path,
         settings: &Settings,
     ) -> anyhow::Result<Option<(OverrideCfg, ActiveSource)>> {
-        let overrides = settings.overrides_by_dir();
         let mut dir = Some(dir);
 
         while let Some(d) = dir {
-            // First check the override database
-            if let Some(name) = overrides.get(d) {
-                let source = ActiveSource::OverrideDb(d.to_owned());
-                return Ok(Some((
-                    Override::<PartialToolchainName>::from_str(name)?
-                        .resolve(self)?
-                        .into(),
-                    source,
-                )));
-            }
+            // Look for `rust-toolchain.toml`. A plain `rust-toolchain` file is not a pin.
+            let toolchain_file = d.join("rust-toolchain.toml");
 
-            // Then look for 'rust-toolchain' or 'rust-toolchain.toml'
-            let path_rust_toolchain = d.join("rust-toolchain");
-            let path_rust_toolchain_toml = d.join("rust-toolchain.toml");
-
-            let (toolchain_file, contents, parse_mode) = match (
-                utils::read_file("toolchain file", &path_rust_toolchain),
-                utils::read_file("toolchain file", &path_rust_toolchain_toml),
-            ) {
-                (contents, Err(_)) => {
-                    // no `rust-toolchain.toml` exists
-                    (path_rust_toolchain, contents, ParseMode::Both)
-                }
-                (Err(_), Ok(contents)) => {
-                    // only `rust-toolchain.toml` exists
-                    (path_rust_toolchain_toml, Ok(contents), ParseMode::OnlyToml)
-                }
-                (Ok(contents), Ok(_)) => {
-                    // both `rust-toolchain` and `rust-toolchain.toml` exist
-
-                    warn!(
-                        "both {} and {} exist; using contents of {0}",
-                        path_rust_toolchain
-                            .canonicalize()
-                            .unwrap_or_else(|_| PathBuf::from(&path_rust_toolchain))
-                            .display(),
-                        path_rust_toolchain_toml
-                            .canonicalize()
-                            .unwrap_or_else(|_| PathBuf::from(&path_rust_toolchain_toml))
-                            .display(),
-                    );
-
-                    (path_rust_toolchain, Ok(contents), ParseMode::Both)
-                }
-            };
-
-            if let Ok(contents) = contents {
+            if let Ok(contents) = utils::read_file("toolchain file", &toolchain_file) {
                 // XXX Should not return the unvalidated contents; but a new
                 // internal only safe struct
-                let override_file =
-                    Cfg::parse_override_file(contents, parse_mode).with_context(|| {
-                        RustupError::ParsingFile {
-                            name: "override",
-                            path: toolchain_file.clone(),
-                        }
-                    })?;
+                let override_file = Cfg::parse_override_file(contents).with_context(|| {
+                    RustupError::ParsingFile {
+                        name: "override",
+                        path: toolchain_file.clone(),
+                    }
+                })?;
                 if let Some(toolchain_name_str) = &override_file.toolchain.channel {
                     let toolchain_override =
                         Override::<PartialToolchainName>::from_str(toolchain_name_str.as_str())
@@ -800,33 +688,20 @@ impl<'a> Cfg<'a> {
         Ok(None)
     }
 
-    fn parse_override_file<S: AsRef<str>>(
-        contents: S,
-        parse_mode: ParseMode,
-    ) -> anyhow::Result<OverrideFile> {
+    fn parse_override_file<S: AsRef<str>>(contents: S) -> anyhow::Result<OverrideFile> {
         let contents = contents.as_ref();
 
-        match (contents.lines().count(), parse_mode) {
-            (0, _) => Err(anyhow!(OverrideFileConfigError::Empty)),
-            (1, ParseMode::Both) => {
-                let channel = contents.trim();
+        if contents.lines().count() == 0 || contents.trim().is_empty() {
+            return Err(anyhow!(OverrideFileConfigError::Empty));
+        }
 
-                if channel.is_empty() {
-                    Err(anyhow!(OverrideFileConfigError::Empty))
-                } else {
-                    Ok(channel.into())
-                }
-            }
-            _ => {
-                let override_file = toml::from_str::<OverrideFile>(contents)
-                    .context(OverrideFileConfigError::Parsing)?;
+        let override_file =
+            toml::from_str::<OverrideFile>(contents).context(OverrideFileConfigError::Parsing)?;
 
-                if override_file.is_empty() {
-                    Err(anyhow!(OverrideFileConfigError::Invalid))
-                } else {
-                    Ok(override_file)
-                }
-            }
+        if override_file.is_empty() {
+            Err(anyhow!(OverrideFileConfigError::Invalid))
+        } else {
+            Ok(override_file)
         }
     }
 
@@ -885,17 +760,6 @@ impl<'a> Cfg<'a> {
                 UpdateStatus::Unchanged
             };
             Ok((EnsureInstalled::new(toolchain, status), source))
-        } else if let Some(toolchain) = self.get_default()? {
-            let source = ActiveSource::Default;
-            let status = if let ToolchainName::Channel(desc) = &toolchain {
-                self.ensure_installed(desc, vec![], vec![], None, force_non_host, verbose)
-                    .await?
-                    .status
-            } else {
-                Toolchain::with_source(self, toolchain.clone().into(), &source)?;
-                UpdateStatus::Unchanged
-            };
-            Ok((EnsureInstalled::new(toolchain.into(), status), source))
         } else {
             Err(no_toolchain_error(self.process))
         }
@@ -957,39 +821,6 @@ impl<'a> Cfg<'a> {
             }
             Err(e) => return Err(e.into()),
         })
-    }
-
-    /// Gets the configured default toolchain name in its resolved form, if any.
-    ///
-    /// This is essentially [`Cfg::get_default_resolvable()`] with an extra resolution step.
-    pub(crate) fn get_default(&self) -> anyhow::Result<Option<ToolchainName>> {
-        let Some(toolchain) = self.get_default_resolvable()? else {
-            return Ok(None);
-        };
-        Ok(Some(toolchain.complete(&self.default_host_tuple()?)?))
-    }
-
-    /// Gets the configured default toolchain name in its unresolved form, if any.
-    ///
-    /// # Errors
-    ///
-    /// This function returns an error if:
-    /// - The configuration file is invalid.
-    /// - The configuration file contains an illegal default toolchain name.
-    pub(crate) fn get_default_resolvable(&self) -> anyhow::Result<Option<PartialToolchainName>> {
-        let user_opt = self.settings_file.with(|s| Ok(s.default_toolchain.clone()));
-        let toolchain_maybe_str = if let Some(fallback_settings) = &self.fallback_settings {
-            match user_opt {
-                Err(_) | Ok(None) => Ok(fallback_settings.default_toolchain.clone()),
-                o => o,
-            }
-        } else {
-            user_opt
-        }?;
-        let Some(toolchain) = &toolchain_maybe_str else {
-            return Ok(None);
-        };
-        Ok(Some(PartialToolchainName::from_str(toolchain)?))
     }
 
     /// Lists all the installed toolchains.
@@ -1059,18 +890,6 @@ impl<'a> Cfg<'a> {
         // See: <https://users.rust-lang.org/t/cannot-call-vec-sort-by-key-without-cloning-data/60455/4>
         channels.sort_by(|n, m| n.desc().cmp(m.desc()));
         Ok(channels)
-    }
-
-    /// Create an override for a toolchain
-    pub(crate) fn make_override(
-        &self,
-        path: &Path,
-        toolchain: &impl Display,
-    ) -> anyhow::Result<()> {
-        self.settings_file.with_mut(|s| {
-            s.add_override(path, toolchain.to_string());
-            Ok(())
-        })
     }
 
     pub(crate) fn set_default_host_tuple(&self, host_tuple: String) -> anyhow::Result<()> {
@@ -1194,7 +1013,6 @@ impl Debug for Cfg<'_> {
             update_hash_dir,
             download_dir,
             toolchain_override,
-            env_override,
             dist_root_server,
             dist_root_url,
             quiet,
@@ -1213,7 +1031,6 @@ impl Debug for Cfg<'_> {
             .field("update_hash_dir", update_hash_dir)
             .field("download_dir", download_dir)
             .field("toolchain_override", toolchain_override)
-            .field("env_override", env_override)
             .field("dist_root_server", dist_root_server)
             .field("dist_root_url", dist_root_url)
             .field("quiet", quiet)
@@ -1290,20 +1107,6 @@ pub(crate) fn no_toolchain_error(process: &Process) -> anyhow::Error {
     RustupError::ToolchainNotSelected(process.name().unwrap_or_else(|| "Rust".into())).into()
 }
 
-/// Specifies how a `rust-toolchain`/`rust-toolchain.toml` configuration file should be parsed.
-enum ParseMode {
-    /// Only permit TOML format in a configuration file.
-    ///
-    /// This variant is used for `rust-toolchain.toml` files (with `.toml` extension).
-    OnlyToml,
-    /// Permit both the legacy format (i.e. just the channel name) and the TOML format in
-    /// a configuration file.
-    ///
-    /// This variant is used for `rust-toolchain` files (no file extension) for backwards
-    /// compatibility.
-    Both,
-}
-
 /// Installed paths
 pub(crate) enum InstalledPath<'a> {
     File { name: &'static str, path: PathBuf },
@@ -1319,22 +1122,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_legacy_toolchain_file() {
-        let contents = "nightly-2020-07-10";
-
-        let result = Cfg::parse_override_file(contents, ParseMode::Both);
-        assert_eq!(
-            result.unwrap(),
-            OverrideFile {
-                toolchain: ToolchainSection {
-                    channel: Some(contents.into()),
-                    path: None,
-                    components: None,
-                    targets: None,
-                    profile: None,
-                }
-            }
-        );
+    fn parse_bare_channel_name_is_rejected() {
+        let result = Cfg::parse_override_file("nightly-2020-07-10");
+        assert!(matches!(
+            result.unwrap_err().downcast::<OverrideFileConfigError>(),
+            Ok(OverrideFileConfigError::Parsing)
+        ));
     }
 
     #[test]
@@ -1346,7 +1139,7 @@ targets = [ "wasm32-unknown-unknown", "thumbv2-none-eabi" ]
 profile = "default"
 "#;
 
-        let result = Cfg::parse_override_file(contents, ParseMode::Both);
+        let result = Cfg::parse_override_file(contents);
         assert_eq!(
             result.unwrap(),
             OverrideFile {
@@ -1370,7 +1163,7 @@ profile = "default"
 channel = "nightly-2020-07-10"
 "#;
 
-        let result = Cfg::parse_override_file(contents, ParseMode::Both);
+        let result = Cfg::parse_override_file(contents);
         assert_eq!(
             result.unwrap(),
             OverrideFile {
@@ -1391,7 +1184,7 @@ channel = "nightly-2020-07-10"
 path = "foobar"
 "#;
 
-        let result = Cfg::parse_override_file(contents, ParseMode::Both);
+        let result = Cfg::parse_override_file(contents);
         assert_eq!(
             result.unwrap(),
             OverrideFile {
@@ -1412,7 +1205,7 @@ path = "foobar"
 profile = "minimal"
 "#;
 
-        let result = Cfg::parse_override_file(contents, ParseMode::OnlyToml);
+        let result = Cfg::parse_override_file(contents);
         assert_eq!(
             result.unwrap(),
             OverrideFile {
@@ -1434,7 +1227,7 @@ channel = "nightly-2020-07-10"
 components = []
 "#;
 
-        let result = Cfg::parse_override_file(contents, ParseMode::Both);
+        let result = Cfg::parse_override_file(contents);
         assert_eq!(
             result.unwrap(),
             OverrideFile {
@@ -1456,7 +1249,7 @@ channel = "nightly-2020-07-10"
 targets = []
 "#;
 
-        let result = Cfg::parse_override_file(contents, ParseMode::Both);
+        let result = Cfg::parse_override_file(contents);
         assert_eq!(
             result.unwrap(),
             OverrideFile {
@@ -1477,7 +1270,7 @@ targets = []
 components = [ "rustfmt" ]
 "#;
 
-        let result = Cfg::parse_override_file(contents, ParseMode::Both);
+        let result = Cfg::parse_override_file(contents);
         assert_eq!(
             result.unwrap(),
             OverrideFile {
@@ -1498,7 +1291,7 @@ components = [ "rustfmt" ]
 [toolchain]
 "#;
 
-        let result = Cfg::parse_override_file(contents, ParseMode::Both);
+        let result = Cfg::parse_override_file(contents);
         assert!(matches!(
             result.unwrap_err().downcast::<OverrideFileConfigError>(),
             Ok(OverrideFileConfigError::Invalid)
@@ -1509,7 +1302,7 @@ components = [ "rustfmt" ]
     fn parse_empty_toolchain_file() {
         let contents = "";
 
-        let result = Cfg::parse_override_file(contents, ParseMode::Both);
+        let result = Cfg::parse_override_file(contents);
         assert!(matches!(
             result.unwrap_err().downcast::<OverrideFileConfigError>(),
             Ok(OverrideFileConfigError::Empty)
@@ -1520,7 +1313,7 @@ components = [ "rustfmt" ]
     fn parse_whitespace_toolchain_file() {
         let contents = "   ";
 
-        let result = Cfg::parse_override_file(contents, ParseMode::Both);
+        let result = Cfg::parse_override_file(contents);
         assert!(matches!(
             result.unwrap_err().downcast::<OverrideFileConfigError>(),
             Ok(OverrideFileConfigError::Empty)
@@ -1533,7 +1326,7 @@ components = [ "rustfmt" ]
 channel = nightly
 "#;
 
-        let result = Cfg::parse_override_file(contents, ParseMode::Both);
+        let result = Cfg::parse_override_file(contents);
         assert!(matches!(
             result.unwrap_err().downcast::<OverrideFileConfigError>(),
             Ok(OverrideFileConfigError::Parsing)

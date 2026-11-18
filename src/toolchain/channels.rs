@@ -241,7 +241,6 @@ impl<'a> ChannelToolchain<'a> {
 
         let mut cmd = Command::new(exe_path);
         installed_primary.set_env(&mut cmd); // set up the environment to match rustc, not cargo
-        cmd.env("RUSTUP_TOOLCHAIN", installed_primary.name().to_string());
         Ok(cmd)
     }
 
@@ -294,10 +293,7 @@ impl<'a> ChannelToolchain<'a> {
                 ))
             } else {
                 // available, not installed, recommend installation
-                let selector = match self.toolchain.cfg.get_default()? {
-                    Some(ToolchainName::Channel(n)) if &n == desc => String::new(),
-                    _ => format!("--toolchain {} ", self.toolchain.name()),
-                };
+                let selector = format!("--toolchain {} ", self.toolchain.name());
                 Err(anyhow!(
                     "'{binary_lossy}' is not installed for the toolchain '{desc}'.\nhelp: run `rustup component add {selector}{component_name}` to install it"
                 ))

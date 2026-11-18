@@ -64,13 +64,14 @@ async fn no_colors_in_piped_error_output() {
 }
 
 #[tokio::test]
-async fn rustc_with_bad_rustup_toolchain_env_var() {
+async fn rustc_ignores_rustup_toolchain_env_var() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect_with_env(["rustc"], [("RUSTUP_TOOLCHAIN", "bogus")])
         .await
         .with_stderr(snapbox::str![[r#"
-error:[..] toolchain 'bogus' is not installed[..]
+error: rustup could not choose a version of rustc to run, because one wasn't specified explicitly, and no rust-toolchain.toml was found.
+help: pass a +toolchain argument, or add a rust-toolchain.toml file.
 
 "#]])
         .is_err();
@@ -190,6 +191,11 @@ async fn update_works_without_term() {
 #[tokio::test]
 async fn show_works_with_dumb_term() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
+    cx.config
+        .expect(["rustup", "toolchain", "install", "stable"])
+        .await
+        .is_ok();
+    cx.config.pin("stable");
     let mut cmd = cx.config.cmd("rustup", ["show"]);
     cx.config.env(&mut cmd);
     cmd.env("TERM", "dumb");
@@ -222,18 +228,6 @@ async fn subcommand_required_for_toolchain() {
     assert!(str::from_utf8(&out.stdout).unwrap().contains("Usage"));
 }
 
-// Issue #2425
-// Exit with error and help output when called without subcommand.
-#[tokio::test]
-async fn subcommand_required_for_override() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    let mut cmd = cx.config.cmd("rustup", ["override"]);
-    cx.config.env(&mut cmd);
-    let out = cmd.output().unwrap();
-    assert!(!out.status.success());
-    assert_eq!(out.status.code().unwrap(), 1);
-    assert!(str::from_utf8(&out.stdout).unwrap().contains("Usage"));
-}
 
 // Issue #2425
 // Exit with error and help output when called without subcommand.
@@ -258,9 +252,16 @@ async fn multi_host_smoke_test() {
     let cx = CliTestContext::new(Scenario::MultiHost).await;
     let toolchain = format!("nightly-{MULTI_ARCH1}");
     cx.config
-        .expect(["rustup", "default", &toolchain, "--force-non-host"])
+        .expect([
+            "rustup",
+            "toolchain",
+            "install",
+            &toolchain,
+            "--force-non-host",
+        ])
         .await
         .is_ok();
+    cx.config.pin(&toolchain);
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -286,10 +287,7 @@ async fn custom_toolchain_cargo_fallback_proxy() {
         ])
         .await
         .is_ok();
-    cx.config
-        .expect(["rustup", "default", "mytoolchain"])
-        .await
-        .is_ok();
+    cx.config.pin("mytoolchain");
 
     cx.config
         .expect(["rustup", "update", "stable"])
@@ -343,10 +341,7 @@ async fn custom_toolchain_cargo_fallback_run() {
         ])
         .await
         .is_ok();
-    cx.config
-        .expect(["rustup", "default", "mytoolchain"])
-        .await
-        .is_ok();
+    cx.config.pin("mytoolchain");
 
     cx.config
         .expect(["rustup", "update", "stable"])
@@ -394,9 +389,10 @@ async fn rustup_run_searches_path() {
     let hello_cmd = &["rustup", "run", "nightly", "sh", "-c", "echo hello"];
 
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(hello_cmd)
         .await
@@ -408,12 +404,13 @@ hello
 }
 
 #[tokio::test]
-async fn rustup_doesnt_prepend_path_unnecessarily() {
+async fn rustup_prepends_toolchain_bin() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
 
     let assert_ok_with_paths = |assert: &Assert, data| {
         assert.is_ok();
@@ -424,15 +421,19 @@ async fn rustup_doesnt_prepend_path_unnecessarily() {
         snapbox::assert_data_eq!(stderr, data);
     };
 
-    // For all of these, CARGO_HOME/bin will be auto-prepended.
-    let cargo_home_bin = cx.config.cargodir.join("bin");
+    let toolchain_bin = cx
+        .config
+        .rustupdir
+        .join("toolchains")
+        .join(format!("nightly-{}", this_host_tuple()))
+        .join("bin");
     assert_ok_with_paths(
         cx.config
             .expect(["cargo", "--echo-env", "PATH"])
             .await
-            .extend_redactions([("[CARGO_HOME_BIN]", &cargo_home_bin)]),
+            .extend_redactions([("[TOOLCHAIN_BIN]", &toolchain_bin)]),
         snapbox::str![[r#"
-[CARGO_HOME_BIN]
+[TOOLCHAIN_BIN]
 ...
 "#]],
     );
@@ -441,14 +442,13 @@ async fn rustup_doesnt_prepend_path_unnecessarily() {
         cx.config
             .expect_with_env(["cargo", "--echo-env", "PATH"], [("PATH", "")])
             .await
-            .extend_redactions([("[CARGO_HOME_BIN]", &cargo_home_bin)]),
+            .extend_redactions([("[TOOLCHAIN_BIN]", &toolchain_bin)]),
         snapbox::str![[r#"
-[CARGO_HOME_BIN]
+[TOOLCHAIN_BIN]
 ...
 "#]],
     );
 
-    // Check that CARGO_HOME/bin is prepended to path.
     assert_ok_with_paths(
         cx.config
             .expect_with_env(
@@ -457,38 +457,12 @@ async fn rustup_doesnt_prepend_path_unnecessarily() {
             )
             .await
             .extend_redactions([
-                ("[CARGO_HOME_BIN]", &cargo_home_bin),
+                ("[TOOLCHAIN_BIN]", &toolchain_bin),
                 ("[EXEDIR]", &cx.config.exedir),
             ]),
         snapbox::str![[r#"
-[CARGO_HOME_BIN]
+[TOOLCHAIN_BIN]
 [EXEDIR]
-...
-"#]],
-    );
-
-    // But if CARGO_HOME/bin is already on PATH, it will not be prepended again,
-    // so exedir will take precedence.
-    assert_ok_with_paths(
-        cx.config
-            .expect_with_env(
-                ["cargo", "--echo-env", "PATH"],
-                [(
-                    "PATH",
-                    env::join_paths([&cx.config.exedir, &cargo_home_bin])
-                        .unwrap()
-                        .to_str()
-                        .unwrap(),
-                )],
-            )
-            .await
-            .extend_redactions([
-                ("[CARGO_HOME_BIN]", &cargo_home_bin),
-                ("[EXEDIR]", &cx.config.exedir),
-            ]),
-        snapbox::str![[r#"
-[EXEDIR]
-[CARGO_HOME_BIN]
 ...
 "#]],
     );
@@ -514,10 +488,7 @@ async fn rustup_failed_path_search() {
         .await
         .is_ok();
 
-    cx.config
-        .expect(["rustup", "default", "custom"])
-        .await
-        .is_ok();
+    cx.config.pin("custom");
 
     let broken = &["rustup", "run", "custom", "fake_proxy"];
     cx.config
@@ -565,10 +536,7 @@ async fn rustup_failed_path_search_toolchain() {
         .await
         .is_ok();
 
-    cx.config
-        .expect(["rustup", "default", "custom-2"])
-        .await
-        .is_ok();
+    cx.config.pin("custom-2");
 
     let broken = &["rustup", "run", "custom-1", "cargo-miri"];
     cx.config
@@ -598,7 +566,7 @@ help: if you built this toolchain from source, and used `rustup toolchain link`,
 }
 
 #[tokio::test]
-async fn rustup_run_not_installed() {
+async fn rustup_run_installs_when_missing() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect(["rustup", "install", "stable"])
@@ -607,12 +575,11 @@ async fn rustup_run_not_installed() {
     cx.config
         .expect(["rustup", "run", "nightly", "rustc", "--version"])
         .await
-        .with_stderr(snapbox::str![[r#"
-error: toolchain 'nightly-[HOST_TUPLE]' is not installed
-help: run `rustup toolchain install nightly-[HOST_TUPLE]` to install it
+        .with_stdout(snapbox::str![[r#"
+1.3.0 (hash-nightly-2)
 
 "#]])
-        .is_err();
+        .is_ok();
 }
 
 #[tokio::test]
@@ -623,14 +590,7 @@ async fn rustup_run_install() {
         .await
         .is_ok();
     cx.config
-        .expect([
-            "rustup",
-            "run",
-            "--install",
-            "nightly",
-            "cargo",
-            "--version",
-        ])
+        .expect(["rustup", "run", "nightly", "cargo", "--version"])
         .await
         .is_ok();
     cx.config
@@ -650,17 +610,18 @@ rustc-[HOST_TUPLE]
 async fn toolchains_are_resolved_early() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
 
     let full_toolchain = format!("nightly-{}", this_host_tuple());
     cx.config
-        .expect(["rustup", "default", &full_toolchain])
+        .expect(["rustup", "toolchain", "install", &full_toolchain])
         .await
         .with_stderr(snapbox::str![[r#"
 ...
-info: using existing install for nightly-[HOST_TUPLE]
+info: syncing channel updates for nightly-[HOST_TUPLE]
 ...
 "#]])
         .is_ok();
@@ -671,9 +632,10 @@ info: using existing install for nightly-[HOST_TUPLE]
 async fn proxies_pass_empty_args() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "run", "nightly", "rustc", "--empty-arg-test", ""])
         .await
@@ -684,9 +646,10 @@ async fn proxies_pass_empty_args() {
 async fn rls_exists_in_toolchain() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "stable"])
+        .expect(["rustup", "toolchain", "install", "stable"])
         .await
         .is_ok();
+    cx.config.pin("stable");
     cx.config
         .expect(["rustup", "component", "add", "rls"])
         .await
@@ -701,9 +664,10 @@ async fn run_rls_when_not_available_in_toolchain() {
     let cx = CliTestContext::new(Scenario::UnavailableRls).await;
     cx.config.set_current_dist_date("2015-01-01");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rls", "--version"])
         .await
@@ -727,15 +691,16 @@ error: the 'rls' component which provides the command 'rls[EXE]' is not availabl
 async fn run_rls_when_not_installed() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "stable"])
+        .expect(["rustup", "toolchain", "install", "stable"])
         .await
         .is_ok();
+    cx.config.pin("stable");
     cx.config
         .expect(["rls", "--version"])
         .await
         .with_stderr(snapbox::str![[r#"
 error: 'rls[EXE]' is not installed for the toolchain 'stable-[HOST_TUPLE]'.
-help: run `rustup component add rls` to install it
+help: run `rustup component add --toolchain stable-[HOST_TUPLE] rls` to install it
 
 "#]])
         .is_err();
@@ -745,9 +710,10 @@ help: run `rustup component add rls` to install it
 async fn run_rls_when_not_installed_for_nightly() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "stable"])
+        .expect(["rustup", "toolchain", "install", "stable"])
         .await
         .is_ok();
+    cx.config.pin("stable");
     cx.config
         .expect(["rustup", "toolchain", "install", "nightly"])
         .await
@@ -768,9 +734,10 @@ async fn run_rust_lldb_when_not_in_toolchain() {
     let cx = CliTestContext::new(Scenario::UnavailableRls).await;
     cx.config.set_current_dist_date("2015-01-01");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rust-lldb", "--version"])
         .await
@@ -786,9 +753,10 @@ async fn rename_rls_before() {
     let cx = CliTestContext::new(Scenario::ArchivesV2).await;
     cx.config.set_current_dist_date("2015-01-01");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "component", "add", "rls"])
         .await
@@ -806,9 +774,10 @@ async fn rename_rls_after() {
     let cx = CliTestContext::new(Scenario::ArchivesV2).await;
     cx.config.set_current_dist_date("2015-01-01");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
 
     cx.config.set_current_dist_date("2015-01-02");
     cx.config.expect(["rustup", "update"]).await.is_ok();
@@ -826,9 +795,10 @@ async fn rename_rls_add_old_name() {
     let cx = CliTestContext::new(Scenario::ArchivesV2).await;
     cx.config.set_current_dist_date("2015-01-01");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
 
     cx.config.set_current_dist_date("2015-01-02");
     cx.config.expect(["rustup", "update"]).await.is_ok();
@@ -846,9 +816,10 @@ async fn rename_rls_list() {
     let cx = CliTestContext::new(Scenario::ArchivesV2).await;
     cx.config.set_current_dist_date("2015-01-01");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
 
     cx.config.set_current_dist_date("2015-01-02");
     cx.config.expect(["rustup", "update"]).await.is_ok();
@@ -873,9 +844,10 @@ async fn rename_rls_preview_list() {
     let cx = CliTestContext::new(Scenario::ArchivesV2).await;
     cx.config.set_current_dist_date("2015-01-01");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
 
     cx.config.set_current_dist_date("2015-01-02");
     cx.config.expect(["rustup", "update"]).await.is_ok();
@@ -900,9 +872,10 @@ async fn rename_rls_remove() {
     let cx = CliTestContext::new(Scenario::ArchivesV2).await;
     cx.config.set_current_dist_date("2015-01-01");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
 
     cx.config.set_current_dist_date("2015-01-02");
     cx.config.expect(["rustup", "update"]).await.is_ok();
@@ -958,9 +931,10 @@ async fn toolchains_symlink() {
     symlink_dir(&test_toolchains, &cx.config.rustupdir.join("toolchains")).unwrap();
 
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "toolchain", "list"])
         .await
@@ -988,6 +962,8 @@ nightly[..]
         .with_stdout("")
         .with_stderr(snapbox::str![[r#"
 info: no installed toolchains
+warn: no toolchain installed
+help: run 'rustup toolchain install stable' to download the latest stable release of Rust, then name it in rust-toolchain.toml
 
 "#]])
         .is_ok();
@@ -1011,9 +987,10 @@ async fn tmp_downloads_symlink() {
 
     cx.config.set_current_dist_date("2015-01-01");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
 
     cx.config.set_current_dist_date("2015-01-02");
     cx.config.expect(["rustup", "update"]).await.is_ok();
@@ -1055,8 +1032,8 @@ test
         .with_stderr(snapbox::str![[r#"
 info: uninstalling toolchain test
 info: toolchain test uninstalled
-warn: no toolchain installed and no default toolchain set
-help: run 'rustup default stable' to download the latest stable release of Rust and set it as your default toolchain.
+warn: no toolchain installed
+help: run 'rustup toolchain install stable' to download the latest stable release of Rust, then name it in rust-toolchain.toml
 
 "#]])
         .is_ok();
@@ -1077,9 +1054,10 @@ async fn update_unavailable_rustc() {
     let cx = CliTestContext::new(Scenario::Unavailable).await;
     cx.config.set_current_dist_date("2015-01-01");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
 
     cx.config
         .expect(["rustc", "--version"])
@@ -1122,16 +1100,6 @@ error: toolchain 'nightly-[HOST_TUPLE]' is not installable
 ...
 "#]])
         .is_err();
-    // implicit attempt to install should fail
-    cx.config
-        .expect(["rustup", "default", "nightly"])
-        .await
-        .with_stderr(snapbox::str![[r#"
-...
-error: toolchain 'nightly-[HOST_TUPLE]' is not installable
-...
-"#]])
-        .is_err();
 }
 
 // issue #1329
@@ -1139,9 +1107,10 @@ error: toolchain 'nightly-[HOST_TUPLE]' is not installable
 async fn install_beta_with_tag() {
     let cx = CliTestContext::new(Scenario::BetaTag).await;
     cx.config
-        .expect(["rustup", "default", "1.78.0-beta"])
+        .expect(["rustup", "toolchain", "install", "1.78.0-beta"])
         .await
         .is_ok();
+    cx.config.pin("1.78.0-beta");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -1152,9 +1121,10 @@ async fn install_beta_with_tag() {
         .is_ok();
 
     cx.config
-        .expect(["rustup", "default", "1.79.0-beta.2"])
+        .expect(["rustup", "toolchain", "install", "1.79.0-beta.2"])
         .await
         .is_ok();
+    cx.config.pin("1.79.0-beta.2");
     cx.config
         .expect(["rustc", "--version"])
         .await
@@ -1170,9 +1140,10 @@ async fn update_nightly_even_with_incompat() {
     let cx = CliTestContext::new(Scenario::MissingComponent).await;
     cx.config.set_current_dist_date("2019-09-12");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
 
     cx.config
         .expect(["rustc", "--version"])
@@ -1213,9 +1184,10 @@ async fn nightly_backtrack_skips_missing() {
     let cx = CliTestContext::new(Scenario::MissingNightly).await;
     cx.config.set_current_dist_date("2019-09-16");
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
 
     cx.config
         .expect(["rustc", "--version"])
@@ -1351,9 +1323,10 @@ error: cargo does not currently support completions for[..]
 async fn add_remove_component() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config.expect_component_executable("rustc").await;
     cx.config
         .expect(["rustup", "component", "remove", "rustc"])
@@ -1376,10 +1349,7 @@ async fn which() {
         .expect(["rustup", "toolchain", "link", "custom-1", &path_1])
         .await
         .is_ok();
-    cx.config
-        .expect(["rustup", "default", "custom-1"])
-        .await
-        .is_ok();
+    cx.config.pin("custom-1");
     cx.config
         .expect(["rustup", "which", "rustc"])
         .await
@@ -1413,10 +1383,7 @@ async fn which_asking_uninstalled_toolchain() {
         .expect(["rustup", "toolchain", "link", "custom-1", &path_1])
         .await
         .is_ok();
-    cx.config
-        .expect(["rustup", "default", "custom-1"])
-        .await
-        .is_ok();
+    cx.config.pin("custom-1");
     cx.config
         .expect(["rustup", "which", "rustc"])
         .await
@@ -1448,10 +1415,7 @@ async fn which_asking_uninstalled_components() {
         .expect(["rustup", "toolchain", "link", "custom-1", &path_1])
         .await
         .is_ok();
-    cx.config
-        .expect(["rustup", "default", "custom-1"])
-        .await
-        .is_ok();
+    cx.config.pin("custom-1");
     cx.config
         .expect(["rustup", "which", "rustfmt"])
         .await
@@ -1488,10 +1452,7 @@ async fn which_unknown_binary() {
         .expect(["rustup", "toolchain", "link", "custom-1", &path_1])
         .await
         .is_ok();
-    cx.config
-        .expect(["rustup", "default", "custom-1"])
-        .await
-        .is_ok();
+    cx.config.pin("custom-1");
     cx.config
         .expect(["rustup", "which", "ls"])
         .await
@@ -1528,9 +1489,10 @@ async fn override_by_toolchain_on_the_command_line() {
         .is_ok();
 
     cx.config
-        .expect(["rustup", "default", "nightly"])
+        .expect(["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
+    cx.config.pin("nightly");
     cx.config
         .expect(["rustup", "+stable", "which", "rustc"])
         .await
@@ -1551,9 +1513,8 @@ async fn override_by_toolchain_on_the_command_line() {
         .expect(["rustup", "+nightly", "show"])
         .await
         .with_stdout(snapbox::str![[r#"
-...
-active because: overridden by +toolchain on the command line
-...
+nightly-[HOST_TUPLE]
+
 "#]])
         .is_ok();
     cx.config
@@ -1569,14 +1530,6 @@ error:[..] toolchain 'foo' is not installed[..]
         .await
         .with_stderr(snapbox::str![[r#"
 info: profile set to minimal
-
-"#]])
-        .is_ok();
-    cx.config
-        .expect(["rustup", "default"])
-        .await
-        .with_stdout(snapbox::str![[r#"
-nightly-[HOST_TUPLE][..]
 
 "#]])
         .is_ok();
@@ -1599,20 +1552,6 @@ custom-1 [..]/custom-1
 
 "#]])
         .is_ok();
-}
-
-#[tokio::test]
-async fn update_self_smart_guess() {
-    let cx = CliTestContext::new(Scenario::SimpleV2).await;
-    cx.config
-        .expect(["rustup", "update", "self"])
-        .await
-        .is_err()
-        .with_stderr(snapbox::str![[r#"
-...
-info: if you meant to update rustup itself, use `rustup self update`
-...
-"#]]);
 }
 
 #[tokio::test]
@@ -1663,9 +1602,10 @@ rust-docs-[HOST_TUPLE][..]
 async fn rustup_updates_cargo_env_if_proxy() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(["rustup", "default", "stable"])
+        .expect(["rustup", "toolchain", "install", "stable"])
         .await
         .is_ok();
+    cx.config.pin("stable");
 
     use std::env::consts::EXE_SUFFIX;
     let proxy_path = cx
@@ -1716,6 +1656,7 @@ CARGO environment variable not set[..]
 async fn rust_analyzer_proxy_uses_hosted_without_external() {
     let cx = CliTestContext::new(Scenario::RustAnalyzer).await;
     cx.config.expect(RUST_ANALYZER_SETUP_CMD).await.is_ok();
+    cx.config.pin("stable");
 
     let real_path = cx
         .config
@@ -1730,6 +1671,7 @@ async fn rust_analyzer_proxy_uses_hosted_without_external() {
 async fn rust_analyzer_proxy_uses_hosted_over_external() {
     let cx = CliTestContext::new(Scenario::RustAnalyzer).await;
     cx.config.expect(RUST_ANALYZER_SETUP_CMD).await.is_ok();
+    cx.config.pin("stable");
 
     let tempdir = tempfile::Builder::new().prefix("rustup").tempdir().unwrap();
     let extern_dir = tempdir.path();
@@ -1759,6 +1701,7 @@ async fn rust_analyzer_proxy_uses_hosted_over_external() {
 async fn rust_analyzer_proxy_uses_external_without_hosted() {
     let cx = CliTestContext::new(Scenario::RustAnalyzer).await;
     cx.config.expect(RUST_ANALYZER_SETUP_CMD).await.is_ok();
+    cx.config.pin("stable");
 
     let tempdir = tempfile::Builder::new().prefix("rustup").tempdir().unwrap();
     let extern_dir = tempdir.path();
@@ -1804,6 +1747,7 @@ info: falling back to "[EXTERN_PATH]"
 async fn rust_analyzer_proxy_skips_external_redirecting_to_rustup() {
     let cx = CliTestContext::new(Scenario::RustAnalyzer).await;
     cx.config.expect(RUST_ANALYZER_SETUP_CMD).await.is_ok();
+    cx.config.pin("stable");
 
     let tempdir = tempfile::Builder::new().prefix("rustup").tempdir().unwrap();
 
@@ -1883,7 +1827,6 @@ const RUST_ANALYZER_SETUP_CMD: &[&str] = &[
     "toolchain",
     "install",
     "stable",
-    "--default",
     "--profile=minimal",
     "--component=rust-analyzer",
 ];
@@ -1893,8 +1836,8 @@ async fn warn_auto_install_on_proxy() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect_with_env(
-            ["rustc", "--version"],
-            [("RUSTUP_TOOLCHAIN", "stable"), ("RUSTUP_AUTO_INSTALL", "1")],
+            ["rustc", "+stable", "--version"],
+            [("RUSTUP_AUTO_INSTALL", "1")],
         )
         .await
         .with_stdout(snapbox::str![[r#"
@@ -1916,8 +1859,8 @@ async fn warn_auto_install_on_rustup() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect_with_env(
-            ["rustup", "doc", "--path"],
-            [("RUSTUP_TOOLCHAIN", "stable"), ("RUSTUP_AUTO_INSTALL", "1")],
+            ["rustup", "+stable", "doc", "--path"],
+            [("RUSTUP_AUTO_INSTALL", "1")],
         )
         .await
         .with_stdout(snapbox::str![[r#"

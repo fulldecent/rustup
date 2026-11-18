@@ -42,12 +42,18 @@ $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile
 Different package managers take slightly different approaches towards managing rustup.
 After installing rustup with your favorite package manager, there are usually two possibilities:
 
-- If your package manager has made the `rustup` command available
-  together with proxies for Rust tools such as `rustc` and `cargo`,
-  picking a default toolchain (e.g. `stable`) would usually be enough:
+- If your package manager has made the `rustup` command available,
+  install a toolchain and name it in `rust-toolchain.toml`, or pass an
+  in-line toolchain on a rustup command. Some packages also install shims
+  such as `rustc` and `cargo`. A shim is not recommended.
 
   ```sh
-  $ rustup default stable
+  $ rustup toolchain install stable
+  ```
+
+  ```toml
+  [toolchain]
+  channel = "stable"
   ```
 
   > As of 2024/12/23, this is the case for
@@ -61,17 +67,14 @@ After installing rustup with your favorite package manager, there are usually tw
   $ rustup-init
   ```
 
-  This will allow you to perform the initial setup of `rustup`, populate all the proxies
-  managed by rustup, and install a default toolchain.
+  This copies the `rustup` binary into Cargo's bin directory. Install a
+  toolchain afterwards with `rustup toolchain install`.
 
   > As of 2024/12/23, this is the case for
   > [DNF](https://developer.fedoraproject.org/tech/languages/rust/further-reading.html).
 
-When the installation is completed, please make sure that the rustup proxies
-(usually under `$HOME/.cargo/bin`) are [correctly exposed] via your `$PATH`,
-and you should be able to run `rustup`, `rustc`, `cargo`, etc. normally.
-
-[correctly exposed]: ./already-installed-rust.html#ensure-the-correct-path-configuration
+The installer leaves `PATH` unchanged. Invoke `rustup` by the path it
+printed, then install and name a toolchain.
 
 ### APT
 
@@ -90,10 +93,9 @@ You can use `brew` to install `rustup`[^not-rust]:
 $ brew install rustup
 ```
 
-Please note that Rust tools like `rustc` and `cargo` are not available via `$PATH` by default
-in this `rustup` distribution
-(see [homebrew-core#177582](https://github.com/Homebrew/homebrew-core/pull/177582) for more details).
-You might want to add `$(brew --prefix rustup)/bin` to `$PATH` to make them easier to access.
+This Homebrew formula does not put `rustc` or `cargo` on `$PATH`
+(see [homebrew-core#177582](https://github.com/Homebrew/homebrew-core/pull/177582)).
+Invoke `$(brew --prefix rustup)/bin/rustup`. A shim is not recommended.
 
 [^not-rust]:
     This is not to be confused with the `rust` package,
@@ -216,6 +218,5 @@ SHA-256 checksums are also available by appending `.sha256` to the link.
 ## Self-compiled installation
 
 To install `rustup` from source, check out the git repository from
-<https://github.com/rust-lang/rustup> and run `cargo run --release`. Note that
-after installation the `rustup` toolchains will supersede any pre-existing
-toolchains by prepending `~/.cargo/bin` to the `PATH` environment variable.
+<https://github.com/rust-lang/rustup> and run `cargo run --release`. The
+installed binary is `rustup`. It does not change `PATH`.
