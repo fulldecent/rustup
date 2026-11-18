@@ -36,12 +36,10 @@ use std::{
 use anyhow::{Context, anyhow};
 use clap::ValueEnum;
 use itertools::Itertools;
-use same_file::is_same_file;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, trace, warn};
 
 use crate::{
-    DUP_TOOLS, TOOLS,
     cli::{
         common::{self, Confirm, report_error},
         errors::CliError,
@@ -527,18 +525,7 @@ fn clean_cargo_home(
     info!("removing rustup tool links and binary");
 
     let rustup_path = cargo_bin.join(format!("rustup{EXE_SUFFIX}"));
-
-    let proxy_paths = TOOLS
-        .iter()
-        .chain(DUP_TOOLS.iter())
-        .map(|tool| cargo_bin.join(format!("{tool}{EXE_SUFFIX}")));
-
-    for proxy_path in proxy_paths {
-        if is_same_file(&proxy_path, &rustup_path).unwrap_or(false) {
-            utils::remove_file("rustup tool proxy", &proxy_path)?;
-        }
-    }
-
+    stage::remove_rustup_owned_proxies(&cargo_bin, &rustup_path)?;
     utils::remove_file("rustup_bin", &rustup_path)?;
 
     #[cfg(windows)]

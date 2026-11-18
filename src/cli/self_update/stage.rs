@@ -5,8 +5,9 @@ use std::{
 };
 
 use anyhow::Context;
+use same_file::is_same_file;
 
-use crate::{process::Process, utils};
+use crate::{DUP_TOOLS, TOOLS, process::Process, utils};
 
 /// Exclusive right to replace the installed rustup binary.
 pub(super) struct InstallLock {
@@ -37,7 +38,9 @@ impl InstallLock {
 
     /// Installs the running executable as `rustup` in `bin_path`.
     ///
-    /// Proxy names such as `cargo` and `rustc` are not created.
+    /// Proxy names such as `cargo` and `rustc` are not created. Names that are
+    /// already the same file as the installed rustup are removed first, so a
+    /// reinstall does not leave those names running the previous executable.
     pub(super) fn install_bins(
         &self,
         bin_path: &Path,
@@ -77,9 +80,29 @@ impl InstallLock {
         }
 
         let _ = force_hard_links;
+        // Identify proxies while they still share the installed rustup file.
+        // Publishing the new binary replaces that directory entry, and the old
+        // names would otherwise keep the previous executable.
+        remove_rustup_owned_proxies(bin_path, &rustup_path)?;
         replace_rustup_binary(&pending, &rustup_path)?;
         Ok(())
     }
+}
+
+/// Removes proxy names in `bin_path` that are the same file as `rustup_path`.
+///
+/// A missing rustup, or a tool that is a different file, is left in place.
+pub(super) fn remove_rustup_owned_proxies(
+    bin_path: &Path,
+    rustup_path: &Path,
+) -> anyhow::Result<()> {
+    for tool in TOOLS.iter().chain(DUP_TOOLS.iter()) {
+        let proxy_path = bin_path.join(format!("{tool}{EXE_SUFFIX}"));
+        if is_same_file(&proxy_path, rustup_path).unwrap_or(false) {
+            utils::remove_file("rustup tool proxy", &proxy_path)?;
+        }
+    }
+    Ok(())
 }
 
 fn replace_rustup_binary(replacement: &Path, rustup: &Path) -> anyhow::Result<()> {
@@ -181,6 +204,35 @@ mod tests {
 
         assert_eq!(fs::read_to_string(rustup).unwrap(), "new rustup");
         assert!(!pending.exists());
+    }
+
+    #[test]
+    fn install_bins_removes_hardlinked_proxy_names() {
+        let root = test_dir().unwrap();
+        let process = test_process(root.path());
+        let bin = root.path().join("cargo/bin");
+        fs::create_dir_all(&bin).unwrap();
+        let rustup = bin.join(format!("rustup{EXE_SUFFIX}"));
+        let cargo = bin.join(format!("cargo{EXE_SUFFIX}"));
+        let rustc = bin.join(format!("rustc{EXE_SUFFIX}"));
+        let rustfmt = bin.join(format!("rustfmt{EXE_SUFFIX}"));
+        fs::write(&rustup, "old rustup").unwrap();
+        fs::hard_link(&rustup, &cargo).unwrap();
+        fs::hard_link(&rustup, &rustc).unwrap();
+        fs::write(&rustfmt, "user rustfmt").unwrap();
+        let source = root.path().join("new-rustup");
+        fs::write(&source, "new rustup").unwrap();
+
+        InstallLock::lock(&process.process)
+            .unwrap()
+            .install_bins_from(&source, &bin, false)
+            .unwrap();
+
+        assert_eq!(fs::read_to_string(&rustup).unwrap(), "new rustup");
+        assert!(!cargo.exists());
+        assert!(!rustc.exists());
+        assert_eq!(fs::read_to_string(&rustfmt).unwrap(), "user rustfmt");
+        assert!(!bin.join(format!("rustdoc{EXE_SUFFIX}")).exists());
     }
 
     fn test_process(root: &Path) -> TestProcess {
