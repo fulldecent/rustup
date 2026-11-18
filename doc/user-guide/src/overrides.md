@@ -74,9 +74,8 @@ case for nightly-only software that pins to a revision from the release
 archives.
 
 In these cases the toolchain can be named in the project's directory in a file
-called `rust-toolchain.toml` or `rust-toolchain`. If both files are present in
-a directory, the latter is used for backwards compatibility. The files use the
-[TOML] format and have the following layout:
+called `rust-toolchain.toml`. The file uses the
+[TOML] format and has the following layout:
 
 [TOML]: https://toml.io/
 
@@ -91,23 +90,10 @@ profile = "minimal"
 The `[toolchain]` section is mandatory, and at least one property must be
 specified. `channel` and `path` are mutually exclusive.
 
-For backwards compatibility, `rust-toolchain` files also support a legacy
-format that only contains a toolchain name without any TOML encoding, e.g.
-just `nightly-2021-01-21`. The file has to be encoded in US-ASCII in this case
-(if you are on Windows, check the encoding and that it does not start with a
-BOM). The legacy format is not available in `rust-toolchain.toml` files.
+A plain-text `rust-toolchain` file is not read. The only file pin is
+`rust-toolchain.toml`.
 
-If you see the following error (when running `rustc`, `cargo` or other command)
-
-```
-error: invalid channel name '[toolchain]' in '/PATH/TO/DIRECTORY/rust-toolchain'
-```
-
-it means you're running `rustup` pre-1.23.0 and trying to interact with a project
-that uses the new TOML encoding in the `rust-toolchain` file. You need to upgrade
-`rustup` to 1.23.0+.
-
-The `rust-toolchain.toml`/`rust-toolchain` files are suitable to check in to
+The `rust-toolchain.toml` file is suitable to check in to
 source control. If that's done, `Cargo.lock` should probably be tracked too if
 the toolchain is pinned to a specific release, to avoid potential compatibility
 issues with dependencies.

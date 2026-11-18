@@ -540,8 +540,8 @@ rustc-[HOST_TUPLE]
 async fn file_override_toolchain_err_handling() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
-    rustup::utils::raw::write_file(&toolchain_file, "beta").unwrap();
+    let toolchain_file = cwd.join("rust-toolchain.toml");
+    rustup::utils::raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"beta\"").unwrap();
     cx.config
         .expect_with_env(["rustc", "--version"], [("RUSTUP_AUTO_INSTALL", "1")])
         .await

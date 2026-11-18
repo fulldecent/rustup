@@ -1384,9 +1384,9 @@ async fn show_toolchain_toolchain_file_override() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
 
-    raw::write_file(&toolchain_file, "nightly").unwrap();
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
 
     cx.config
         .expect(["rustup", "show"])
@@ -1430,9 +1430,9 @@ async fn show_toolchain_version_nested_file_override() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
 
-    raw::write_file(&toolchain_file, "nightly").unwrap();
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
 
     let subdir = cwd.join("foo");
 
@@ -1473,9 +1473,9 @@ async fn show_toolchain_toolchain_file_override_not_installed() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
 
-    raw::write_file(&toolchain_file, "nightly").unwrap();
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
 
     // I'm not sure this should really be erroring when the toolchain
     // is not installed; just capturing the behavior.
@@ -2600,8 +2600,8 @@ async fn file_override() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
-    raw::write_file(&toolchain_file, "nightly").unwrap();
+    let toolchain_file = cwd.join("rust-toolchain.toml");
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
 
     cx.config
         .expect(&["rustc", "--version"])
@@ -3029,8 +3029,8 @@ async fn file_override_subdir() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
-    raw::write_file(&toolchain_file, "nightly").unwrap();
+    let toolchain_file = cwd.join("rust-toolchain.toml");
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
 
     let subdir = cwd.join("subdir");
     fs::create_dir_all(&subdir).unwrap();
@@ -3073,8 +3073,12 @@ async fn file_override_with_archive() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
-    raw::write_file(&toolchain_file, "nightly-2015-01-01").unwrap();
+    let toolchain_file = cwd.join("rust-toolchain.toml");
+    raw::write_file(
+        &toolchain_file,
+        "[toolchain]\nchannel = \"nightly-2015-01-01\"",
+    )
+    .unwrap();
 
     cx.config
         .expect(["rustc", "--version"])
@@ -3114,7 +3118,7 @@ async fn file_override_toml_format_select_installed_toolchain() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
     raw::write_file(
         &toolchain_file,
         r#"
@@ -3162,7 +3166,7 @@ async fn file_override_toml_format_install_both_toolchain_and_components() {
         .without_stdout("rust-src (installed)");
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
     raw::write_file(
         &toolchain_file,
         r#"
@@ -3210,7 +3214,7 @@ async fn file_override_toml_format_add_missing_components() {
         .without_stdout("rust-src (installed)");
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
     raw::write_file(
         &toolchain_file,
         r#"
@@ -3249,7 +3253,7 @@ async fn file_override_toml_format_add_missing_targets() {
         .without_stdout(&format!("{CROSS_ARCH2} (installed)"));
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
     raw::write_file(
         &toolchain_file,
         &format!(
@@ -3285,7 +3289,7 @@ async fn file_override_toml_format_skip_invalid_component() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
     raw::write_file(
         &toolchain_file,
         r#"
@@ -3329,7 +3333,7 @@ rust-docs-[HOST_TUPLE] (installed)
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
     raw::write_file(
         &toolchain_file,
         r#"
@@ -3368,7 +3372,7 @@ async fn default_profile_is_respected_with_rust_toolchain_file() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
     raw::write_file(
         &toolchain_file,
         r#"
@@ -3426,8 +3430,8 @@ async fn close_file_override_beats_far_directory_override() {
     let subdir = cwd.join("subdir");
     fs::create_dir_all(&subdir).unwrap();
 
-    let toolchain_file = subdir.join("rust-toolchain");
-    raw::write_file(&toolchain_file, "nightly").unwrap();
+    let toolchain_file = subdir.join("rust-toolchain.toml");
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
 
     let cx = cx.change_dir(&subdir);
     cx.config
@@ -3677,8 +3681,8 @@ async fn directory_override_doesnt_need_to_exist_unless_it_is_selected() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
-    raw::write_file(&toolchain_file, "nightly").unwrap();
+    let toolchain_file = cwd.join("rust-toolchain.toml");
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
 
     cx.config
         .expect(["rustc", "--version"])
@@ -3707,8 +3711,8 @@ async fn env_override_beats_file_override() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
-    raw::write_file(&toolchain_file, "nightly").unwrap();
+    let toolchain_file = cwd.join("rust-toolchain.toml");
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
 
     cx.config
         .expect_with_env(["rustc", "--version"], [("RUSTUP_TOOLCHAIN", "beta")])
@@ -3755,8 +3759,8 @@ async fn plus_override_beats_file_override() {
         .is_ok();
 
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
-    raw::write_file(&toolchain_file, "nightly").unwrap();
+    let toolchain_file = cwd.join("rust-toolchain.toml");
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
 
     cx.config
         .expect(["rustc", "+beta", "--version"])
@@ -3772,15 +3776,15 @@ async fn plus_override_beats_file_override() {
 async fn file_override_not_installed_custom() {
     let cx = CliTestContext::new(Scenario::None).await;
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
-    raw::write_file(&toolchain_file, "gumbo").unwrap();
+    let toolchain_file = cwd.join("rust-toolchain.toml");
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"gumbo\"").unwrap();
 
     cx.config
         .expect(["rustup", "show", "active-toolchain"])
         .await
         .with_stderr(snapbox::str![[r#"
 ...
-error: custom toolchain 'gumbo' specified in override file '[..]/rust-toolchain' is not installed
+error: custom toolchain 'gumbo' specified in override file '[..]/rust-toolchain.toml' is not installed
 ...
 "#]])
         .is_err();
@@ -3789,7 +3793,7 @@ error: custom toolchain 'gumbo' specified in override file '[..]/rust-toolchain'
         .await
         .with_stderr(snapbox::str![[r#"
 ...
-error: custom toolchain 'gumbo' specified in override file '[..]/rust-toolchain' is not installed
+error: custom toolchain 'gumbo' specified in override file '[..]/rust-toolchain.toml' is not installed
 ...
 "#]])
         .is_err();
@@ -3826,16 +3830,16 @@ error: custom toolchain 'i-am-the-walrus' specified in override file '[..]/rust-
 async fn bad_file_override() {
     let cx = CliTestContext::new(Scenario::None).await;
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
     // invalid name - cannot specify no toolchain in a toolchain file
-    raw::write_file(&toolchain_file, "none").unwrap();
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"none\"").unwrap();
 
     cx.config
         .expect(["rustc", "--version"])
         .await
         .with_stderr(snapbox::str![[r#"
 ...
-error: invalid toolchain name detected in override file '[..]/rust-toolchain'
+error: invalid toolchain name detected in override file '[..]/rust-toolchain.toml'
 ...
 "#]])
         .is_err();
@@ -3876,16 +3880,20 @@ error: invalid toolchain name detected in override file '[..]/rust-toolchain.tom
 async fn valid_override_settings() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
+    let toolchain_file = cwd.join("rust-toolchain.toml");
     cx.config
         .expect(&["rustup", "default", "nightly"])
         .await
         .is_ok();
     let nightly_with_host = format!("nightly-{}", this_host_tuple());
-    raw::write_file(&toolchain_file, "nightly").unwrap();
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"nightly\"").unwrap();
     cx.config.expect(&["rustc", "--version"]).await.is_ok();
     // Special case: same version as is installed is permitted.
-    raw::write_file(&toolchain_file, &nightly_with_host).unwrap();
+    raw::write_file(
+        &toolchain_file,
+        &format!("[toolchain]\nchannel = \"{nightly_with_host}\""),
+    )
+    .unwrap();
     cx.config.expect(&["rustc", "--version"]).await.is_ok();
     let fullpath = cx
         .config
@@ -3903,7 +3911,7 @@ async fn valid_override_settings() {
         ])
         .await
         .is_ok();
-    raw::write_file(&toolchain_file, "system").unwrap();
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel = \"system\"").unwrap();
     cx.config.expect(&["rustc", "--version"]).await.is_ok();
 }
 
@@ -3913,8 +3921,12 @@ async fn file_override_with_target_info() {
     // files that include it.
     let cx = CliTestContext::new(Scenario::None).await;
     let cwd = cx.config.current_dir();
-    let toolchain_file = cwd.join("rust-toolchain");
-    raw::write_file(&toolchain_file, "nightly-x86_64-unknown-linux-gnu").unwrap();
+    let toolchain_file = cwd.join("rust-toolchain.toml");
+    raw::write_file(
+        &toolchain_file,
+        "[toolchain]\nchannel = \"nightly-x86_64-unknown-linux-gnu\"",
+    )
+    .unwrap();
 
     cx.config
         .expect(["rustc", "--version"])
@@ -4304,7 +4316,7 @@ async fn rust_toolchain_toml_default_uses_configured_default() {
         .is_ok();
 }
 
-/// Ensures that `rust-toolchain.toml` files (with `.toml` extension) only allow TOML contents
+/// A bare channel name is not a valid `rust-toolchain.toml`.
 #[tokio::test]
 async fn only_toml_in_rust_toolchain_toml() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
@@ -4324,24 +4336,27 @@ error: could not parse override file: '[CWD]/rust-toolchain.toml'[..]
         .is_err();
 }
 
-/// Checks that a warning occurs if both `rust-toolchain` and `rust-toolchain.toml` files exist
+/// A plain `rust-toolchain` file is not a pin, even next to a directory that has a default.
 #[tokio::test]
-async fn warn_on_duplicate_rust_toolchain_file() {
+async fn plain_rust_toolchain_file_is_ignored() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
+    cx.config
+        .expect(["rustup", "default", "stable"])
+        .await
+        .is_ok();
+    cx.config
+        .expect(["rustup", "toolchain", "install", "nightly"])
+        .await
+        .is_ok();
     let cwd = cx.config.current_dir();
-    let toolchain_file_1 = cwd.join("rust-toolchain");
-    raw::write_file(&toolchain_file_1, "stable").unwrap();
-    let toolchain_file_2 = cwd.join("rust-toolchain.toml");
-    raw::write_file(&toolchain_file_2, "[toolchain]").unwrap();
+    raw::write_file(&cwd.join("rust-toolchain"), "nightly").unwrap();
 
     cx.config
-        .expect(&["rustup", "toolchain", "install"])
+        .expect(["rustc", "--version"])
         .await
-        .extend_redactions([("[CWD]", &cwd.canonicalize().unwrap())])
-        .with_stderr(snapbox::str![[r#"
-...
-warn: both [CWD]/rust-toolchain and [CWD]/rust-toolchain.toml exist; using contents of [CWD]/rust-toolchain
-...
+        .with_stdout(snapbox::str![[r#"
+1.1.0 (hash-stable-1.1.0)
+
 "#]])
         .is_ok();
 }
