@@ -6,10 +6,9 @@ and override which toolchain is used:
 
 1. A [toolchain override shorthand] used on the command-line, such as `cargo
 +beta`.
-2. The `RUSTUP_TOOLCHAIN` environment variable.
-3. A [directory override], set with the `rustup override` command.
-4. The [`rust-toolchain.toml`] file.
-5. The [default toolchain].
+2. A [directory override], set with the `rustup override` command.
+3. The [`rust-toolchain.toml`] file.
+4. The [default toolchain].
 
 The toolchain is chosen in the order listed above, using the first one that is
 specified. There is one exception though: directory overrides and the

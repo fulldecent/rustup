@@ -29,7 +29,6 @@ fn main() {
                 //
                 // Detect this here and work around it.
                 assert!(cfg!(windows));
-                assert!(env::var_os("RUSTUP_TOOLCHAIN").is_some());
                 let mut alt = me.clone();
                 alt.pop(); // remove our filename
                 assert!(alt.ends_with("fallback"));
@@ -78,10 +77,7 @@ fn main() {
             assert!(status.success());
         }
         Some("--recursive-cargo") => {
-            let status = Command::new("cargo")
-                .args(&["+nightly", "--version"])
-                .status()
-                .unwrap();
+            let status = Command::new("rustc").arg("--version").status().unwrap();
             assert!(status.success());
         }
         Some("--echo-args") => {

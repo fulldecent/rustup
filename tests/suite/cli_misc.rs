@@ -64,13 +64,14 @@ async fn no_colors_in_piped_error_output() {
 }
 
 #[tokio::test]
-async fn rustc_with_bad_rustup_toolchain_env_var() {
+async fn rustc_ignores_rustup_toolchain_env_var() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect_with_env(["rustc"], [("RUSTUP_TOOLCHAIN", "bogus")])
         .await
         .with_stderr(snapbox::str![[r#"
-error:[..] toolchain 'bogus' is not installed[..]
+error: rustup could not choose a version of rustc to run, because one wasn't specified explicitly, and no default is configured.
+help: run 'rustup default stable' to download the latest stable release of Rust and set it as your default toolchain.
 
 "#]])
         .is_err();
@@ -408,7 +409,7 @@ hello
 }
 
 #[tokio::test]
-async fn rustup_doesnt_prepend_path_unnecessarily() {
+async fn rustup_prepends_toolchain_bin() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect(["rustup", "default", "nightly"])
@@ -424,15 +425,19 @@ async fn rustup_doesnt_prepend_path_unnecessarily() {
         snapbox::assert_data_eq!(stderr, data);
     };
 
-    // For all of these, CARGO_HOME/bin will be auto-prepended.
-    let cargo_home_bin = cx.config.cargodir.join("bin");
+    let toolchain_bin = cx
+        .config
+        .rustupdir
+        .join("toolchains")
+        .join(format!("nightly-{}", this_host_tuple()))
+        .join("bin");
     assert_ok_with_paths(
         cx.config
             .expect(["cargo", "--echo-env", "PATH"])
             .await
-            .extend_redactions([("[CARGO_HOME_BIN]", &cargo_home_bin)]),
+            .extend_redactions([("[TOOLCHAIN_BIN]", &toolchain_bin)]),
         snapbox::str![[r#"
-[CARGO_HOME_BIN]
+[TOOLCHAIN_BIN]
 ...
 "#]],
     );
@@ -441,14 +446,13 @@ async fn rustup_doesnt_prepend_path_unnecessarily() {
         cx.config
             .expect_with_env(["cargo", "--echo-env", "PATH"], [("PATH", "")])
             .await
-            .extend_redactions([("[CARGO_HOME_BIN]", &cargo_home_bin)]),
+            .extend_redactions([("[TOOLCHAIN_BIN]", &toolchain_bin)]),
         snapbox::str![[r#"
-[CARGO_HOME_BIN]
+[TOOLCHAIN_BIN]
 ...
 "#]],
     );
 
-    // Check that CARGO_HOME/bin is prepended to path.
     assert_ok_with_paths(
         cx.config
             .expect_with_env(
@@ -457,38 +461,12 @@ async fn rustup_doesnt_prepend_path_unnecessarily() {
             )
             .await
             .extend_redactions([
-                ("[CARGO_HOME_BIN]", &cargo_home_bin),
+                ("[TOOLCHAIN_BIN]", &toolchain_bin),
                 ("[EXEDIR]", &cx.config.exedir),
             ]),
         snapbox::str![[r#"
-[CARGO_HOME_BIN]
+[TOOLCHAIN_BIN]
 [EXEDIR]
-...
-"#]],
-    );
-
-    // But if CARGO_HOME/bin is already on PATH, it will not be prepended again,
-    // so exedir will take precedence.
-    assert_ok_with_paths(
-        cx.config
-            .expect_with_env(
-                ["cargo", "--echo-env", "PATH"],
-                [(
-                    "PATH",
-                    env::join_paths([&cx.config.exedir, &cargo_home_bin])
-                        .unwrap()
-                        .to_str()
-                        .unwrap(),
-                )],
-            )
-            .await
-            .extend_redactions([
-                ("[CARGO_HOME_BIN]", &cargo_home_bin),
-                ("[EXEDIR]", &cx.config.exedir),
-            ]),
-        snapbox::str![[r#"
-[EXEDIR]
-[CARGO_HOME_BIN]
 ...
 "#]],
     );
@@ -1893,8 +1871,8 @@ async fn warn_auto_install_on_proxy() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect_with_env(
-            ["rustc", "--version"],
-            [("RUSTUP_TOOLCHAIN", "stable"), ("RUSTUP_AUTO_INSTALL", "1")],
+            ["rustc", "+stable", "--version"],
+            [("RUSTUP_AUTO_INSTALL", "1")],
         )
         .await
         .with_stdout(snapbox::str![[r#"
@@ -1916,8 +1894,8 @@ async fn warn_auto_install_on_rustup() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect_with_env(
-            ["rustup", "doc", "--path"],
-            [("RUSTUP_TOOLCHAIN", "stable"), ("RUSTUP_AUTO_INSTALL", "1")],
+            ["rustup", "+stable", "doc", "--path"],
+            [("RUSTUP_AUTO_INSTALL", "1")],
         )
         .await
         .with_stdout(snapbox::str![[r#"

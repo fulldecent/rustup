@@ -241,7 +241,6 @@ impl<'a> ChannelToolchain<'a> {
 
         let mut cmd = Command::new(exe_path);
         installed_primary.set_env(&mut cmd); // set up the environment to match rustc, not cargo
-        cmd.env("RUSTUP_TOOLCHAIN", installed_primary.name().to_string());
         Ok(cmd)
     }
 

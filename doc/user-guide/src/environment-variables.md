@@ -9,11 +9,6 @@
   root `rustup` folder, used for storing installed toolchains and
   configuration options.
 
-- `RUSTUP_TOOLCHAIN` (default: none). If set, will [override] the toolchain used
-  for all rust tool invocations. A toolchain with this name should be installed,
-  or invocations will fail. This can specify custom toolchains, installable
-  toolchains, or the absolute path to a toolchain.
-
 - `RUSTUP_DIST_SERVER` (default: `https://static.rust-lang.org`). Sets the root
   URL for downloading static resources related to Rust. You can change this to
   instead use a local mirror, or to test the binaries from the staging
@@ -72,10 +67,9 @@
 - `RUSTUP_CONCURRENT_DOWNLOADS` _unstable_ (default: 2). Controls the number of
   downloads made concurrently.
 
-- `RUSTUP_TOOLCHAIN_SOURCE` _unstable_. Set by rustup to tell proxied tools how `RUSTUP_TOOLCHAIN` was determined. Non-rustup tools should not set this environment variable, except insofar as to mirror an earlier invocation from rustup.
+- `RUSTUP_TOOLCHAIN_SOURCE` _unstable_. Set by rustup to tell the child how the toolchain was selected (`cli`, `toolchain-file`, `path-override`, or `default`). Non-rustup tools should not set this environment variable.
 
 [directive syntax]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
 [dc]: https://docs.docker.com/storage/storagedriver/overlayfs-driver/#modifying-files-or-directories
-[override]: overrides.md
 [tracing viewer]: https://github.com/catapult-project/catapult/blob/master/tracing/README.md
 [rustup issue tracker]: https://github.com/rust-lang/rustup/issues

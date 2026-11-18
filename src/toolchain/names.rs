@@ -17,9 +17,8 @@
 //! `ToolchainName` is the result of resolving `PartialToolchainName` with a
 //! host tuple, or parsing an installed toolchain name directly.
 //!
-//! `PartialToolchainNameOrPath` represents the values permittable in
-//! `RUSTUP_TOOLCHAIN`: resolved or not resolved official names, custom names,
-//! and absolute paths.
+//! `PartialToolchainNameOrPath` represents a `+toolchain` argument: resolved or
+//! not resolved official names, custom names, and absolute paths.
 //!
 //! `ToolchainNameOrPath` represents all the toolchain names that can make sense
 //! for referring to actually present toolchains. One of a `ToolchainName` or an
@@ -324,9 +323,8 @@ impl Display for ToolchainName {
     }
 }
 
-/// PartialToolchainNameOrPath is used to process values set in
-/// RUSTUP_TOOLCHAIN: resolvable and resolved official names, custom names and
-/// absolute paths.
+/// A `+toolchain` argument: resolvable and resolved official names, custom
+/// names, and absolute paths.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub(crate) enum PartialToolchainNameOrPath {
     Named(PartialToolchainName),
@@ -392,9 +390,8 @@ impl From<PartialToolchainName> for PartialToolchainNameOrPath {
 
 /// ToolchainNameOrPath can be used in calls to Cfg that alter configuration,
 /// like setting overrides, or that depend on configuration, like calculating
-/// the toolchain directory. It is not used to model the RUSTUP_TOOLCHAIN
-/// variable, because that can take unresolved toolchain values that are not
-/// invalid for referring to an installed toolchain.
+/// the toolchain directory. A `+toolchain` argument can still name a toolchain
+/// that is not installed yet, so that form uses `PartialToolchainNameOrPath`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ToolchainNameOrPath {
     Named(ToolchainName),

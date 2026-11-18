@@ -112,7 +112,6 @@ impl<T: Into<String>> From<T> for OverrideFile {
 #[derive(Clone, Debug)]
 pub(crate) enum ActiveSource {
     Default,
-    Environment,
     CommandLine,
     OverrideDb(PathBuf),
     ToolchainFile(PathBuf),
@@ -122,9 +121,6 @@ impl ActiveSource {
     pub fn to_reason(&self) -> String {
         match self {
             Self::Default => String::from("it's the default toolchain"),
-            Self::Environment => {
-                String::from("overridden by environment variable RUSTUP_TOOLCHAIN")
-            }
             Self::CommandLine => String::from("overridden by +toolchain on the command line"),
             Self::OverrideDb(path) => format!("directory override for '{}'", path.display()),
             Self::ToolchainFile(path) => format!("overridden by '{}'", path.display()),
@@ -136,7 +132,6 @@ impl Display for ActiveSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Default => "default",
-            Self::Environment => "env",
             Self::CommandLine => "cli",
             Self::OverrideDb(_) => "path-override",
             Self::ToolchainFile(_) => "toolchain-file",
@@ -186,10 +181,9 @@ impl<T> Deref for EnsureInstalled<T> {
     }
 }
 
-// Represents a toolchain override from a +toolchain command line option,
-// RUSTUP_TOOLCHAIN environment variable, or rust-toolchain.toml file etc. Can
-// include components and targets from a rust-toolchain.toml that should be
-// downloaded and installed.
+// Represents a toolchain override from a +toolchain command line option
+// or a rust-toolchain.toml file. Can include components and targets from a
+// rust-toolchain.toml that should be downloaded and installed.
 #[derive(Clone, Debug)]
 pub(crate) enum OverrideCfg {
     PathBased(ToolchainPath),
@@ -332,7 +326,6 @@ pub(crate) struct Cfg<'a> {
     update_hash_dir: PathBuf,
     pub download_dir: PathBuf,
     pub toolchain_override: Option<Override<PartialToolchainNameOrPath>>,
-    env_override: Option<Override<PartialToolchainNameOrPath>>,
     pub(crate) dist_root_server: String,
     pub dist_root_url: String,
     pub quiet: bool,
@@ -391,12 +384,6 @@ impl<'a> Cfg<'a> {
         let update_hash_dir = rustup_dir.join("update-hashes");
         let download_dir = rustup_dir.join("downloads");
 
-        // Environment override
-        let env_override = match &process.var_opt("RUSTUP_TOOLCHAIN")? {
-            Some(tc) => Some(Override::<PartialToolchainNameOrPath>::from_str(tc)?),
-            None => None,
-        };
-
         let dist_root_server = dist_root_server(process)?;
         let dist_root = dist_root_server.clone() + "/dist";
 
@@ -410,7 +397,6 @@ impl<'a> Cfg<'a> {
             update_hash_dir,
             download_dir,
             toolchain_override: None,
-            env_override,
             dist_root_server,
             dist_root_url: dist_root,
             quiet,
@@ -657,14 +643,6 @@ impl<'a> Cfg<'a> {
             // First check +toolchain override from the command line
             if let Some(name) = &self.toolchain_override {
                 Some((name.clone().resolve(self)?.into(), ActiveSource::CommandLine))
-            }
-            // Then check the RUSTUP_TOOLCHAIN environment variable
-            else if let Some(name) = &self.env_override {
-                // Because path based toolchain files exist, this has to support
-                // custom, distributable, and absolute path toolchains otherwise
-                // rustup's export of a RUSTUP_TOOLCHAIN when running a process will
-                // error when a nested rustup invocation occurs
-                Some((name.clone().resolve(self)?.into(), ActiveSource::Environment))
             }
             // Then walk up the directory tree from 'path' looking for either the
             // directory in the override database, or a `rust-toolchain.toml` file,
@@ -1148,7 +1126,6 @@ impl Debug for Cfg<'_> {
             update_hash_dir,
             download_dir,
             toolchain_override,
-            env_override,
             dist_root_server,
             dist_root_url,
             quiet,
@@ -1167,7 +1144,6 @@ impl Debug for Cfg<'_> {
             .field("update_hash_dir", update_hash_dir)
             .field("download_dir", download_dir)
             .field("toolchain_override", toolchain_override)
-            .field("env_override", env_override)
             .field("dist_root_server", dist_root_server)
             .field("dist_root_url", dist_root_url)
             .field("quiet", quiet)

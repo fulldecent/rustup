@@ -812,9 +812,8 @@ async fn fallback_cargo_calls_correct_rustc() {
     assert!(rustc_path.exists());
 
     // Here --call-rustc tells the mock cargo bin to exec `rustc --version`.
-    // We should be ultimately calling the custom rustc, according to the
-    // RUSTUP_TOOLCHAIN variable set by the original "cargo" proxy, and
-    // interpreted by the nested "rustc" proxy.
+    // The child PATH starts with the active toolchain's bin directory, so
+    // that rustc is the custom toolchain's rustc.
     cx.config
         .expect(["cargo", "--call-rustc"])
         .await
@@ -825,24 +824,14 @@ async fn fallback_cargo_calls_correct_rustc() {
         .is_ok();
 }
 
-// Checks that cargo can recursively invoke itself with rustup shorthand (via
-// the proxy).
-//
-// This involves a series of chained commands:
+// A toolchain command puts that toolchain's bin directory first on PATH.
+// Nested `rustc` is the toolchain binary, not another rustup proxy.
 //
 // 1. Calls `cargo --recursive-cargo-subcommand`
-// 2. The rustup `cargo` proxy launches, and launches the "mock" nightly cargo exe.
-// 3. The nightly "mock" cargo sees --recursive-cargo-subcommand, and launches
-//    `cargo-foo --recursive-cargo`
-// 4. `cargo-foo` sees `--recursive-cargo` and launches `cargo +nightly --version`
-// 5. The rustup `cargo` proxy launches, and launches the "mock" nightly cargo exe.
-// 6. The nightly "mock" cargo sees `--version` and prints the version.
-//
-// Previously, rustup would place the toolchain's `bin` directory in PATH for
-// Windows due to some DLL issues. However, those aren't necessary anymore.
-// If the toolchain `bin` directory is in PATH, then this test would fail in
-// step 5 because the `cargo` executable would be the "mock" nightly cargo,
-// and the first argument would be `+nightly` which would be an error.
+// 2. The rustup `cargo` proxy launches the nightly cargo exe.
+// 3. That cargo launches `cargo-foo --recursive-cargo`
+// 4. `cargo-foo` launches `rustc --version`
+// 5. `rustc` is the nightly toolchain binary, because its directory is first on PATH.
 #[tokio::test]
 async fn recursive_cargo() {
     let cx = CliTestContext::new(Scenario::ArchivesV2).await;
@@ -874,8 +863,8 @@ async fn recursive_cargo() {
 "#]])
         .is_ok();
 
-    // If we have set the current recursion count to the maximum while doing
-    // another recursion, then rustup should bail out warning about it.
+    // The nested rustc is the toolchain binary, so a recursion count that
+    // would stop another proxy does not stop this command.
     cx.config
         .expect_with_env(
             ["cargo", "--recursive-cargo-subcommand"],
@@ -885,11 +874,11 @@ async fn recursive_cargo() {
             )],
         )
         .await
-        .with_stderr(snapbox::str![[r#"
-error: infinite recursion detected
-...
+        .with_stdout(snapbox::str![[r#"
+1.3.0 (hash-nightly-2)
+
 "#]])
-        .is_err();
+        .is_ok();
 }
 
 #[tokio::test]
@@ -1666,10 +1655,14 @@ active because: directory override for '[..]'
 }
 
 #[tokio::test]
-async fn show_toolchain_env() {
+async fn show_ignores_rustup_toolchain_env() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
-        .expect(&["rustup", "default", "nightly"])
+        .expect(&["rustup", "default", "stable"])
+        .await
+        .is_ok();
+    cx.config
+        .expect(&["rustup", "toolchain", "install", "nightly"])
         .await
         .is_ok();
     cx.config
@@ -1683,12 +1676,13 @@ rustup home:  [RUSTUP_DIR]
 
 installed toolchains
 --------------------
-nightly-[HOST_TUPLE] (active, default)
+stable-[HOST_TUPLE] (active, default)
+nightly-[HOST_TUPLE]
 
 active toolchain
 ----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by environment variable RUSTUP_TOOLCHAIN
+name: stable-[HOST_TUPLE]
+active because: it's the default toolchain
 installed targets:
   [HOST_TUPLE]
 
@@ -1696,7 +1690,7 @@ installed targets:
 }
 
 #[tokio::test]
-async fn show_toolchain_env_not_installed() {
+async fn show_does_not_install_from_rustup_toolchain_env() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect_with_env(
@@ -1718,8 +1712,7 @@ installed toolchains
 
 active toolchain
 ----------------
-name: nightly-[HOST_TUPLE]
-active because: overridden by environment variable RUSTUP_TOOLCHAIN
+no active toolchain
 
 "#]]);
 }
@@ -2614,7 +2607,7 @@ async fn file_override() {
 }
 
 #[tokio::test]
-async fn env_override_path() {
+async fn rustup_toolchain_path_env_is_ignored() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect(&["rustup", "default", "stable"])
@@ -2638,7 +2631,7 @@ async fn env_override_path() {
         )
         .await
         .with_stdout(snapbox::str![[r#"
-1.3.0 (hash-nightly-2)
+1.1.0 (hash-stable-1.1.0)
 
 "#]])
         .is_ok();
@@ -3451,16 +3444,11 @@ async fn override_order() {
     let host = this_host_tuple();
     // give each override type a different toolchain
     let default_tc = &format!("beta-2015-01-01-{host}");
-    let env_tc = &format!("stable-2015-01-01-{host}");
     let dir_tc = &format!("beta-2015-01-02-{host}");
     let file_tc = &format!("stable-2015-01-02-{host}");
     let command_tc = &format!("nightly-2015-01-01-{host}");
     cx.config
         .expect(["rustup", "install", default_tc])
-        .await
-        .is_ok();
-    cx.config
-        .expect(["rustup", "install", env_tc])
         .await
         .is_ok();
     cx.config
@@ -3538,31 +3526,28 @@ error: no active toolchain
 "#]])
         .is_ok();
 
-    // env > dir override > file > default
+    // RUSTUP_TOOLCHAIN is not a selector, so the directory override remains.
     cx.config
         .expect_with_env(
             ["rustup", "show", "active-toolchain"],
-            [("RUSTUP_TOOLCHAIN", &**env_tc)],
+            [("RUSTUP_TOOLCHAIN", "nightly")],
         )
         .await
-        .extend_redactions([("[ENV_TC]", env_tc)])
+        .extend_redactions([("[DIR_TC]", dir_tc)])
         .with_stdout(snapbox::str![[r#"
-[ENV_TC] (overridden by environment variable RUSTUP_TOOLCHAIN)
+[DIR_TC] (directory override for '[..]')
 
 "#]])
         .is_ok();
 
-    // +toolchain > env > dir override > file > default
+    // +toolchain > dir override > file > default
     cx.config
-        .expect_with_env(
-            [
-                "rustup",
-                &format!("+{command_tc}"),
-                "show",
-                "active-toolchain",
-            ],
-            [("RUSTUP_TOOLCHAIN", &**env_tc)],
-        )
+        .expect([
+            "rustup",
+            &format!("+{command_tc}"),
+            "show",
+            "active-toolchain",
+        ])
         .await
         .extend_redactions([("[COMMAND_TC]", command_tc)])
         .with_stdout(snapbox::str![[r#"
@@ -3590,17 +3575,19 @@ cli
 }
 
 #[tokio::test]
-async fn rustup_toolchain_source_env() {
+async fn rustup_toolchain_env_is_not_a_source() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
+    let toolchain_file = cx.config.current_dir().join("rust-toolchain.toml");
+    raw::write_file(&toolchain_file, "[toolchain]\nchannel='nightly'").unwrap();
     cx.config
         .expect_with_env(
             ["cargo", "--echo-env", "RUSTUP_TOOLCHAIN_SOURCE"],
-            [("RUSTUP_TOOLCHAIN", "nightly")],
+            [("RUSTUP_TOOLCHAIN", "stable")],
         )
         .await
         .with_stderr(snapbox::str![[r#"
 ...
-env
+toolchain-file
 
 "#]]);
 }
@@ -3695,7 +3682,7 @@ async fn directory_override_doesnt_need_to_exist_unless_it_is_selected() {
 }
 
 #[tokio::test]
-async fn env_override_beats_file_override() {
+async fn rustup_toolchain_env_does_not_beat_file() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect(["rustup", "default", "stable"])
@@ -3718,22 +3705,26 @@ async fn env_override_beats_file_override() {
         .expect_with_env(["rustc", "--version"], [("RUSTUP_TOOLCHAIN", "beta")])
         .await
         .with_stdout(snapbox::str![[r#"
-1.2.0 (hash-beta-1.2.0)
+1.3.0 (hash-nightly-2)
 
 "#]])
         .is_ok();
 }
 
 #[tokio::test]
-async fn env_override_default_uses_configured_default() {
+async fn rustup_toolchain_env_does_not_change_the_default() {
     let cx = CliTestContext::new(Scenario::SimpleV2).await;
     cx.config
         .expect(["rustup", "default", "stable"])
         .await
         .is_ok();
+    cx.config
+        .expect(["rustup", "toolchain", "install", "beta"])
+        .await
+        .is_ok();
 
     cx.config
-        .expect_with_env(["rustc", "--version"], [("RUSTUP_TOOLCHAIN", "default")])
+        .expect_with_env(["rustc", "--version"], [("RUSTUP_TOOLCHAIN", "beta")])
         .await
         .with_stdout(snapbox::str![[r#"
 1.1.0 (hash-stable-1.1.0)
@@ -4956,24 +4947,6 @@ channel = "beta"
 
     fs::remove_file(toolchain_file).unwrap();
     cx.config
-        .expect_with_env(
-            ["rustup", "toolchain", "pin"],
-            [("RUSTUP_TOOLCHAIN", "beta")],
-        )
-        .await
-        .is_ok();
-    toml_assert.eq(
-        fs::read_to_string(toolchain_file).unwrap(),
-        snapbox::str![[r#"
-...
-[toolchain]
-channel = "beta"
-
-"#]],
-    );
-
-    fs::remove_file(toolchain_file).unwrap();
-    cx.config
         .expect(["rustup", "+beta", "toolchain", "pin", "--qualified"])
         .await
         .is_ok();
@@ -4987,23 +4960,6 @@ channel = "beta-[HOST_TUPLE]"
 "#]],
     );
 
-    fs::remove_file(toolchain_file).unwrap();
-    cx.config
-        .expect_with_env(
-            ["rustup", "toolchain", "pin", "--qualified"],
-            [("RUSTUP_TOOLCHAIN", "beta")],
-        )
-        .await
-        .is_ok();
-    toml_assert.eq(
-        fs::read_to_string(toolchain_file).unwrap(),
-        snapbox::str![[r#"
-...
-[toolchain]
-channel = "beta-[HOST_TUPLE]"
-
-"#]],
-    );
 }
 
 #[tokio::test]
@@ -5032,7 +4988,7 @@ error: no default toolchain to pin
         .await
         .is_err()
         .with_stderr(snapbox::str![[r#"
-error: invalid toolchain name 'none'
+error: no default toolchain to pin
 
 "#]]);
 }
