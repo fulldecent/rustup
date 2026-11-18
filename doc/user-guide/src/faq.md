@@ -39,5 +39,6 @@ program has that file open. Close that program and try again.
 ### rustup exited successfully but I can't run `rustc --version`
 
 `rustup` does not put toolchain binaries on `PATH`. Name a toolchain in
-`rust-toolchain.toml`, pass a `+toolchain` argument, or invoke the toolchain
-binary by its path.
+`rust-toolchain.toml`, or run `rustup +nightly run rustc --version` or
+`rustup run nightly rustc --version`. The toolchain binary can also be
+invoked by its path.

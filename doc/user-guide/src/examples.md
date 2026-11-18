@@ -8,7 +8,7 @@
 | `rustup target add arm-linux-androideabi`                  | Install the Android target                                           |
 | `rustup target remove arm-linux-androideabi`               | Remove the Android target                                            |
 | `rustup run nightly rustc foo.rs`                          | Run the nightly regardless of the active toolchain                   |
-| `rustc +nightly foo.rs`                                    | [Shorthand] way to run a nightly compiler                            |
+| `rustup +nightly run rustc foo.rs`                         | [In-line] way to run a nightly compiler                              |
 | `rustup run nightly bash`                                  | Run a shell configured for the nightly compiler                      |
 | `rustup toolchain install stable-msvc`                    | On Windows, install the MSVC toolchain instead of GNU                |
 | `channel = "nightly-2015-04-01"` in `rust-toolchain.toml`  | For the current directory, use a nightly from a specific date        |
@@ -19,5 +19,5 @@
 | `rustup man cargo`                                         | \(_Unix only_\) View the man page for a given command (like `cargo`) |
 
 [profile]: concepts/profiles.md
-[shorthand]: overrides.md#toolchain-override-shorthand
+[in-line]: overrides.md#toolchain-override-shorthand
 [targets]: cross-compilation.md

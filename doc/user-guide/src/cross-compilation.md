@@ -47,7 +47,7 @@ info: installing component 'rust-std' for 'arm-linux-androideabi'
 ```
 
 You can then build for Android with Cargo by passing the `--target` flag, as in
-`cargo build --target=arm-linux-androideabi`.
+`rustup run stable cargo build --target=arm-linux-androideabi`.
 
 Note that `rustup target add` only installs the Rust standard library for a
 given target. This is sufficient for certain host/target combinations, but for
