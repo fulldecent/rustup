@@ -42,9 +42,10 @@ $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile
 Different package managers take slightly different approaches towards managing rustup.
 After installing rustup with your favorite package manager, there are usually two possibilities:
 
-- If your package manager has made the `rustup` command available
-  together with proxies for Rust tools such as `rustc` and `cargo`,
-  install a toolchain and name it in `rust-toolchain.toml`:
+- If your package manager has made the `rustup` command available,
+  install a toolchain and name it in `rust-toolchain.toml`, or pass an
+  in-line toolchain on a rustup command. Some packages also install shims
+  such as `rustc` and `cargo`. A shim is not recommended.
 
   ```sh
   $ rustup toolchain install stable
@@ -92,10 +93,9 @@ You can use `brew` to install `rustup`[^not-rust]:
 $ brew install rustup
 ```
 
-Please note that Rust tools like `rustc` and `cargo` are not available via `$PATH` by default
-in this `rustup` distribution
-(see [homebrew-core#177582](https://github.com/Homebrew/homebrew-core/pull/177582) for more details).
-You might want to add `$(brew --prefix rustup)/bin` to `$PATH` to make them easier to access.
+This Homebrew formula does not put `rustc` or `cargo` on `$PATH`
+(see [homebrew-core#177582](https://github.com/Homebrew/homebrew-core/pull/177582)).
+Invoke `$(brew --prefix rustup)/bin/rustup`. A shim is not recommended.
 
 [^not-rust]:
     This is not to be confused with the `rust` package,

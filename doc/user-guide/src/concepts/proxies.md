@@ -1,12 +1,9 @@
 # Proxies
 
-`rustup` provides a number of wrappers for common Rust tools.
-These are called _proxies_ and represent commands which are
-provided by the various [components].
+A shim is the `rustup` binary invoked under the name of a Rust tool.
+A shim is not recommended. The installer does not create these names.
 
-The list of proxies is currently static in `rustup` and is as follows:
-
-[components]: components.md
+These are the names `rustup` recognizes:
 
 - `rustc` is the compiler for the Rust programming language, provided by the project itself and comes from the `rustc` component.
 

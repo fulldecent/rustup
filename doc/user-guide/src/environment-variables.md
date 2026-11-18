@@ -53,9 +53,7 @@
   toolchain when it is absent. Set this value to `0` to disable automatic
   installation.
 
-- `RUSTUP_HARDLINK_PROXIES` _unstable_. When set, rustup will not attempt to
-  symlink proxies and instead always use hardlinks. If you find this fixes
-  a problem, then please report the issue on the [rustup issue tracker].
+- `RUSTUP_HARDLINK_PROXIES` _unstable_. Ignored. The installer does not create shims.
 
 - `RUSTUP_TERM_PROGRESS_WHEN` (default: `auto`). Controls whether progress bars are shown or not.
   Set to `always` to always enable progress bars, and to `never` to disable them.
