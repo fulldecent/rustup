@@ -171,9 +171,10 @@ impl InstallOpts<'_> {
 
         let cargo_home = process.cargo_home()?;
         let home_dir = process.home_dir();
+        let rustup_bin = cargo_home.join("bin").join(format!("rustup{EXE_SUFFIX}"));
         let msg = format!(
             post_install_msg!(),
-            cargo_bin_dir = HomeDisplay::new(&cargo_home.join("bin"), home_dir.as_deref()),
+            rustup_bin = HomeDisplay::new(&rustup_bin, home_dir.as_deref()),
         );
         md(&mut term, msg);
 
@@ -360,12 +361,12 @@ fn check_existence_of_settings_file(process: &Process) -> anyhow::Result<()> {
 
 fn pre_install_msg(process: &Process) -> anyhow::Result<String> {
     let cargo_home = process.cargo_home()?;
-    let cargo_bin_dir = cargo_home.join("bin");
+    let rustup_bin = cargo_home.join("bin").join(format!("rustup{EXE_SUFFIX}"));
     let rustup_home = home::rustup_home()?;
     Ok(format!(
         pre_install_msg!(),
         cargo_home = cargo_home.display(),
-        cargo_bin_dir = cargo_bin_dir.display(),
+        rustup_bin = rustup_bin.display(),
         rustup_home = rustup_home.display(),
     ))
 }

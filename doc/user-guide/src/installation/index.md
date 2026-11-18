@@ -3,12 +3,11 @@
 Follow the instructions at <https://www.rust-lang.org/tools/install>. If that
 doesn't work for you there are [other installation methods].
 
-`rustup-init` copies the `rustup` binary into Cargo's `bin` directory. On
-Unix that directory is `$HOME/.cargo/bin` and on Windows it is
-`%USERPROFILE%\.cargo\bin`. The installer leaves `PATH` unchanged and does
-not download a toolchain.
+`rustup-init` copies the `rustup` binary to `$HOME/.cargo/bin/rustup` on
+Unix and to `%USERPROFILE%\.cargo\bin\rustup.exe` on Windows. The installer
+leaves `PATH` unchanged and does not download a toolchain.
 
-Invoke `rustup` by that path, install a toolchain, and name it:
+Invoke that executable, install a toolchain, and name it:
 
 ```console
 rustup toolchain install stable

@@ -23,9 +23,9 @@ This can be modified with the `CARGO_HOME` environment variable.
 
 The rustup binary will be copied to:
 
-    {cargo_bin_dir}
+    {rustup_bin}
 
-Invoke rustup by that path. Install a toolchain afterwards with
+Invoke that executable. Install a toolchain afterwards with
 `rustup toolchain install`, then name it in `rust-toolchain.toml`
 or pass a `+toolchain` argument.
 
@@ -38,7 +38,7 @@ macro_rules! post_install_msg {
     () => {
         r"# rustup is installed
 
-The rustup binary is at `{cargo_bin_dir}`.
+The rustup binary is at `{rustup_bin}`.
 
 Install a toolchain with `rustup toolchain install`, then name it
 in `rust-toolchain.toml` or pass a `+toolchain` argument.

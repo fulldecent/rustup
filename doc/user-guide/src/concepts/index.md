@@ -2,16 +2,24 @@
 
 ## How rustup works
 
-`rustup` is a _toolchain multiplexer_. It installs and manages many Rust
-toolchains and presents them all through a single set of tools installed to
-`~/.cargo/bin`. The [`rustc`] and [`cargo`] executables installed in
-`~/.cargo/bin` are _[proxies]_ that delegate to the real toolchain. `rustup`
-then provides mechanisms to easily change the active toolchain by
-reconfiguring the behavior of the proxies.
+`rustup` installs and manages many Rust toolchains. A command selects one
+toolchain in this order:
 
-Running `rustc` runs the proxy in `$HOME/.cargo/bin/rustc`. The proxy uses a
-`+toolchain` argument if you passed one, otherwise the nearest
-`rust-toolchain.toml`. If neither is present, the proxy exits with an error.
+1. A `+toolchain` argument, as in `rustup run nightly cargo build`.
+2. The nearest `rust-toolchain.toml`, walking from the current directory
+   toward the filesystem root.
+
+If neither is present, the command exits with an error.
+
+Run a tool with `rustup run`, for example `rustup run cargo build` or
+`rustup run rustc --version`. `rustup run` installs a missing channel from
+that selection and puts the toolchain's binaries and libraries on the child
+process path.
+
+The installer copies only the `rustup` binary. If that binary is invoked
+under another name, such as [`rustc`] or [`cargo`], the invocation is a
+[proxy][proxies]: it uses the same two rules, then runs the matching binary from
+the selected toolchain. Those names exist only when you create them.
 
 This is similar to Ruby's [rbenv], Python's [pyenv], or Node's [nvm].
 
@@ -47,8 +55,9 @@ This is similar to Ruby's [rbenv], Python's [pyenv], or Node's [nvm].
   "profile" defines a grouping of components. See the [Profiles] chapter for
   more details.
 
-- **proxy** --- A wrapper for a common Rust component (like `rustc`), built to forward
-  CLI invocations to the active Rust toolchain. See the [Proxies] chapter for more details.
+- **proxy** --- The rustup binary invoked under the name of a Rust tool, such as
+  `rustc` or `cargo`. It forwards that command to the selected toolchain. See
+  the [Proxies] chapter for the names rustup recognizes.
 
 [`clippy`]: https://github.com/rust-lang/rust-clippy
 [components]: components.md
